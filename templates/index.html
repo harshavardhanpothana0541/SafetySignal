@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SafetySignal | Emergency Dispatch & Autonomous SOS HUD</title>
     
     <!-- PWA Manifest & Mobile Standalone Tags -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#dc2626">
+    <meta name="theme-color" content="#0a0f1d">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1032/1032989.png">
@@ -30,11 +31,18 @@
             --accent-yellow: #f59e0b;
         }
 
+        html, body {
+            overflow-x: hidden;
+            width: 100%;
+            -webkit-tap-highlight-color: transparent;
+        }
+
         body {
             background-color: var(--bg-dark);
             color: #f3f4f6;
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             min-height: 100vh;
+            padding-bottom: env(safe-area-inset-bottom);
         }
 
         .navbar-brand {
@@ -42,15 +50,25 @@
             letter-spacing: 0.5px;
         }
 
+        /* Responsive Scrollable Nav Tabs */
         .nav-tabs {
             border-bottom: 2px solid var(--card-border);
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .nav-tabs::-webkit-scrollbar {
+            display: none;
         }
 
         .nav-tabs .nav-link {
             color: #9ca3af;
             border: none;
-            padding: 12px 24px;
+            padding: 10px 18px;
             font-weight: 600;
+            white-space: nowrap;
             border-bottom: 3px solid transparent;
             transition: all 0.2s;
         }
@@ -69,29 +87,33 @@
         }
 
         .stat-card {
-            padding: 1.25rem;
+            padding: 1rem;
             border-radius: 10px;
             border: 1px solid var(--card-border);
             background: #161f30;
         }
 
-        /* Pulse Animated SOS Button */
+        /* Fluid Scaling Pulse Animated SOS Button */
         .sos-wrapper {
             position: relative;
-            display: inline-flex;
+            display: flex;
             align-items: center;
             justify-content: center;
-            margin: 20px 0;
+            margin: 1.5rem auto;
+            width: 100%;
+            max-width: 240px;
+            height: 240px;
         }
 
         .sos-pulse-ring {
             position: absolute;
-            width: 220px;
-            height: 220px;
+            width: min(65vw, 220px);
+            height: min(65vw, 220px);
             border-radius: 50%;
             border: 3px solid rgba(239, 68, 68, 0.4);
             animation: pulsate 2s infinite ease-out;
             z-index: 1;
+            pointer-events: none;
         }
 
         @keyframes pulsate {
@@ -102,31 +124,33 @@
         .sos-circle {
             position: relative;
             z-index: 2;
-            width: 175px;
-            height: 175px;
+            width: min(52vw, 175px);
+            height: min(52vw, 175px);
             border-radius: 50%;
             background: radial-gradient(circle, #ef4444 0%, #b91c1c 100%);
-            border: 5px solid rgba(254, 202, 202, 0.6);
-            box-shadow: 0 0 40px rgba(239, 68, 68, 0.5);
+            border: 4px solid rgba(254, 202, 202, 0.6);
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.5);
             color: white;
-            font-size: 2rem;
+            font-size: clamp(1.4rem, 5vw, 2rem);
             font-weight: 900;
             letter-spacing: 2px;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
             transition: transform 0.15s ease, box-shadow 0.15s ease;
         }
 
-        .sos-circle:hover {
-            transform: scale(1.04);
-            box-shadow: 0 0 55px rgba(239, 68, 68, 0.8);
-        }
-
         .sos-circle:active {
-            transform: scale(0.94);
+            transform: scale(0.92);
         }
 
+        /* Dynamic Map Sizing */
         #incidentMap {
             height: 480px;
+            max-height: 55vh;
+            min-height: 260px;
             width: 100%;
             border-radius: 10px;
             border: 1px solid var(--card-border);
@@ -136,8 +160,23 @@
         .badge-active { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid #ef4444; }
         .badge-accepted { background-color: rgba(245, 158, 11, 0.2); color: #fde68a; border: 1px solid #f59e0b; }
         .badge-resolved { background-color: rgba(16, 185, 129, 0.2); color: #a7f3d0; border: 1px solid #10b981; }
+
+        /* Small Screen / Mobile Hardening */
+        @media (max-width: 768px) {
+            .container, .container-fluid {
+                padding-left: 10px !important;
+                padding-right: 10px !important;
+            }
+            .hud-card {
+                padding: 1rem !important;
+            }
+            #incidentMap {
+                height: 300px;
+            }
+        }
     </style>
 </head>
+
 <body class="py-3">
 
 <div class="container-fluid px-lg-5">

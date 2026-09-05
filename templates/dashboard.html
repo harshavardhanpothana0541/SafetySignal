@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SafetySignal | AIOps Telemetry & CAD 112 Command Center</title>
     
     <!-- Bootstrap 5 & Icons -->
@@ -18,27 +19,36 @@
             --border-color: #1e293b;
         }
 
+        html, body {
+            overflow-x: hidden;
+            width: 100%;
+            -webkit-tap-highlight-color: transparent;
+        }
+
         body {
             background-color: var(--bg-dark);
             color: #f1f5f9;
             font-family: system-ui, -apple-system, sans-serif;
             min-height: 100vh;
+            padding-bottom: env(safe-area-inset-bottom);
         }
 
         .hud-card {
             background-color: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
         }
 
         /* Virtual Keypad Feature Phone Styling */
         .virtual-phone {
             background: #1e293b;
-            border: 4px solid #334155;
-            border-radius: 28px;
-            padding: 16px;
+            border: 3px solid #334155;
+            border-radius: 24px;
+            padding: 12px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.6);
-            max-width: 300px;
+            width: 100%;
+            max-width: 280px;
             margin: auto;
         }
 
@@ -49,7 +59,7 @@
             font-weight: bold;
             padding: 8px 10px;
             border-radius: 8px;
-            height: 80px;
+            height: 75px;
             border: 2px solid #65a30d;
             display: flex;
             flex-direction: column;
@@ -60,7 +70,7 @@
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 6px;
-            margin-top: 12px;
+            margin-top: 10px;
         }
 
         .key-btn {
@@ -68,10 +78,11 @@
             color: #f8fafc;
             border: 1px solid #475569;
             border-radius: 6px;
-            padding: 8px;
+            padding: 10px 4px;
             font-weight: bold;
             font-size: 1rem;
-            transition: all 0.1s;
+            user-select: none;
+            transition: transform 0.1s ease, background 0.1s ease;
         }
 
         .key-btn:active {
@@ -89,9 +100,33 @@
             border-radius: 8px;
             padding: 10px;
             border: 1px solid #1e293b;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Mobile Adjustments for CAD & AIOps Charts */
+        @media (max-width: 768px) {
+            .container-fluid {
+                padding-left: 10px !important;
+                padding-right: 10px !important;
+            }
+
+            .hud-card {
+                padding: 1rem !important;
+                margin-bottom: 1rem;
+            }
+
+            canvas {
+                max-height: 220px !important;
+                width: 100% !important;
+            }
+
+            .table-responsive {
+                font-size: 0.85rem;
+            }
         }
     </style>
 </head>
+
 <body class="p-3">
 
 <div class="container-fluid px-lg-4">

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SafetySignal | Tactical Responder HUD</title>
     
     <!-- Bootstrap 5 & Icons -->
@@ -23,11 +23,18 @@
             --accent-amber: #f59e0b;
         }
 
+        html, body {
+            overflow-x: hidden;
+            width: 100%;
+            -webkit-tap-highlight-color: transparent;
+        }
+
         body {
             background-color: var(--hud-bg);
             color: #f3f4f6;
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             min-height: 100vh;
+            padding-bottom: env(safe-area-inset-bottom);
         }
 
         .hud-card {
@@ -37,8 +44,10 @@
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
         }
 
+        /* Responsive Tactical Leaflet Map */
         #tacticalMap {
             height: 52vh;
+            min-height: 300px;
             width: 100%;
             border-radius: 10px;
             border: 1px solid var(--border-color);
@@ -57,6 +66,29 @@
             0% { opacity: 1; }
             50% { opacity: 0.4; }
             100% { opacity: 1; }
+        }
+
+        /* Mobile Adjustments for Responders in the Field */
+        @media (max-width: 768px) {
+            .container, .container-fluid {
+                padding-left: 10px !important;
+                padding-right: 10px !important;
+            }
+
+            #tacticalMap {
+                height: 42vh;
+                min-height: 250px;
+            }
+
+            .hud-card {
+                padding: 1rem !important;
+                margin-bottom: 0.75rem;
+            }
+
+            .btn {
+                padding: 10px 14px;
+                font-size: 0.95rem;
+            }
         }
     </style>
 </head>
