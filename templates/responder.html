@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SafetySignal | Tactical Responder HUD</title>
+    
+    <!-- Bootstrap 5 & Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <style>
+        :root {
+            --hud-bg: #090d16;
+            --card-bg: #111827;
+            --border-color: #1f2937;
+            --accent-red: #ef4444;
+            --accent-green: #10b981;
+            --accent-blue: #3b82f6;
+            --accent-amber: #f59e0b;
+        }
+
+        body {
+            background-color: var(--hud-bg);
+            color: #f3f4f6;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+
+        .hud-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        #tacticalMap {
+            height: 52vh;
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            z-index: 1;
+        }
+
+        .geofence-barrier {
+            transition: all 0.3s ease;
+        }
+
+        .badge-pulse {
+            animation: pulse-ring 1.8s infinite;
+        }
+
+        @keyframes pulse-ring {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="p-3">
+
+<div class="container-fluid">
+    <!-- Tactical Topbar -->
+    <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary border-opacity-25">
+        <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-shield-shaded text-danger fs-3"></i>
+            <div>
+                <h5 class="mb-0 fw-bold">Tactical Responder HUD</h5>
+                <small class="text-secondary">Unit ID: <span id="responderIdBadge" class="text-info fw-semibold">EMT-8841</span> • Verified Unit</small>
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span id="karmaBadge" class="badge bg-primary px-3 py-2">
+                <i class="bi bi-star-fill text-warning me-1"></i> Karma: <span id="karmaPoints">115</span>
+            </span>
+            <span id="wsStatusBadge" class="badge bg-success-subtle text-success border border-success px-3 py-2">
+                ● Live Radar
+            </span>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="row g-3">
+        <!-- Left: Real-Time Tactical Map -->
+        <div class="col-lg-8">
+            <div class="hud-card p-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="small fw-bold text-uppercase text-secondary">
+                        <i class="bi bi-crosshair text-danger me-1"></i> Incident Vector & Real-Time Proximity Lock
+                    </span>
+                    <span id="proximityText" class="badge bg-dark border border-secondary text-warning">
+                        Target Distance: <span id="distVal">No Target</span>
+                    </span>
+                </div>
+                <div id="tacticalMap"></div>
+            </div>
+        </div>
+
+        <!-- Right: Active Target HUD & Geofence Barrier -->
+        <div class="col-lg-4">
+            <div class="hud-card p-3 h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0 text-danger"><i class="bi bi-broadcast-pin me-2"></i>Active Target Dossier</h6>
+                        <span id="activeStatusPill" class="badge bg-secondary">Standby</span>
+                    </div>
+
+                    <!-- Target Dossier Details -->
+                    <div id="targetDossier" class="p-3 rounded bg-dark border border-secondary border-opacity-50 mb-3">
+                        <p class="text-secondary small mb-1"><strong>Emergency Type:</strong> <span id="targetCategory" class="text-white">-</span></p>
+                        <p class="text-secondary small mb-1"><strong>Micro-Location:</strong> <span id="targetMicro" class="text-warning fw-semibold">-</span></p>
+                        <p class="text-secondary small mb-1"><strong>Victim Contact:</strong> <span id="targetPhone" class="text-info">-</span></p>
+                        <p class="text-secondary small mb-0"><strong>Handshake Status:</strong> <span id="targetHandshake" class="badge bg-secondary">Pending</span></p>
+                    </div>
+
+                    <!-- Geofence Dynamic HUD -->
+                    <div class="card bg-dark border-secondary p-3 mb-3 text-center">
+                        <small class="text-secondary text-uppercase fw-bold">Proximity to Door</small>
+                        <h2 id="hudDistanceDisplay" class="fw-bold text-danger my-1">-- m</h2>
+                        <small id="geofenceStatusText" class="text-secondary" style="font-size: 0.75rem;">
+                            🔒 Resolution locked (>50 meters away)
+                        </small>
+                    </div>
+                </div>
+
+                <!-- Tactical Actions -->
+                <div class="d-grid gap-2">
+                    <a id="nativeMapBtn" href="#" target="_blank" class="btn btn-outline-info btn-sm fw-semibold disabled">
+                        <i class="bi bi-geo-alt-fill me-1"></i> Open in Google Maps Navigation
+                    </a>
+                    <button id="resolveGeofenceBtn" class="btn btn-danger fw-bold py-2 disabled" onclick="submitGeofenceResolution()">
+                        <i class="bi bi-lock-fill me-1"></i> Locked (> 50m)
+                    </button>
+                    <button id="releaseTargetBtn" class="btn btn-outline-secondary btn-sm" onclick="abortDispatch()">
+                        <i class="bi bi-x-circle me-1"></i> Release Incident to Fleet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Leaflet JS & Bootstrap Bundle -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const responderId = 'EMT-8841';
+    let responderLat = 16.5075, responderLng = 80.6495;
+    let activeIncident = null;
+    let map = null;
+    let responderMarker = null;
+    let victimMarker = null;
+    let activePolyline = null;
+    let ws = null;
+
+    // --- 1. Tactical Leaflet Radar Initialization ---
+    function initTacticalRadar() {
+        map = L.map('tacticalMap').setView([responderLat, responderLng], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // Custom Blue Radar Dot for Responder
+        const responderIcon = L.divIcon({
+            html: '<div style="background:#3b82f6;width:18px;height:18px;border-radius:50%;border:3px solid white;box-shadow:0 0 10px #3b82f6;"></div>',
+            className: ''
+        });
+        responderMarker = L.marker([responderLat, responderLng], { icon: responderIcon }).addTo(map).bindPopup("<b>You (Tactical Unit)</b>");
+
+        // Click map to simulate walking/driving towards the target
+        map.on('click', (e) => {
+            responderLat = e.latlng.lat;
+            responderLng = e.latlng.lng;
+            responderMarker.setLatLng([responderLat, responderLng]);
+            updateProximityMetrics();
+
+            // Stream updated telemetry to backend & victim
+            if (ws && ws.readyState === WebSocket.OPEN && activeIncident) {
+                ws.send(JSON.stringify({
+                    action: 'UPDATE_LOCATION',
+                    incident_id: activeIncident.id,
+                    lat: responderLat,
+                    lon: responderLng
+                }));
+            }
+        });
+    }
+
+    // --- 2. Haversine Math & Geofence Proximity Lock ---
+    function getDistanceMeters(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function updateProximityMetrics() {
+        if (!activeIncident) return;
+
+        const dist = getDistanceMeters(responderLat, responderLng, activeIncident.lat, activeIncident.lng);
+        document.getElementById('distVal').innerText = `${dist.toFixed(1)} m`;
+        document.getElementById('hudDistanceDisplay').innerText = `${dist.toFixed(1)} m`;
+
+        const resolveBtn = document.getElementById('resolveGeofenceBtn');
+        const statusText = document.getElementById('geofenceStatusText');
+
+        if (dist <= 50.0) {
+            resolveBtn.className = "btn btn-success fw-bold py-2";
+            resolveBtn.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Within 50m: Resolve Incident';
+            resolveBtn.classList.remove('disabled');
+            statusText.innerText = "✓ Geofence verified. You are at the victim's door.";
+            statusText.className = "text-success fw-semibold";
+        } else {
+            resolveBtn.className = "btn btn-danger fw-bold py-2 disabled";
+            resolveBtn.innerHTML = `<i class="bi bi-lock-fill me-1"></i> Locked (${dist.toFixed(0)}m away)`;
+            statusText.innerText = "🔒 Resolution locked (>50 meters away)";
+            statusText.className = "text-secondary";
+        }
+
+        // Draw / Update dynamic polyline route
+        if (activePolyline) map.removeLayer(activePolyline);
+        activePolyline = L.polyline([[responderLat, responderLng], [activeIncident.lat, activeIncident.lng]], {
+            color: dist <= 50.0 ? '#10b981' : '#ef4444',
+            weight: 4,
+            dashArray: '6, 8'
+        }).addTo(map);
+    }
+
+    // --- 3. Target Management & Dossier Binding ---
+    function bindActiveIncident(inc) {
+        activeIncident = inc;
+        document.getElementById('activeStatusPill').className = "badge bg-danger badge-pulse";
+        document.getElementById('activeStatusPill').innerText = "DISPATCH EN ROUTE";
+
+        document.getElementById('targetCategory').innerText = inc.emergency_type || inc.category || "General Emergency";
+        document.getElementById('targetMicro').innerText = inc.micro_location || inc.micro_location_text || "GPS Pin Only";
+        document.getElementById('targetPhone').innerText = inc.victim_phone || "+919876543210";
+
+        // Enable Google Maps navigation link
+        const navBtn = document.getElementById('nativeMapBtn');
+        navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${inc.lat},${inc.lng}`;
+        navBtn.classList.remove('disabled');
+
+        // Add Victim Pin to Radar
+        if (victimMarker) map.removeLayer(victimMarker);
+        victimMarker = L.marker([inc.lat, inc.lng]).addTo(map)
+            .bindPopup(`<b>🚨 EMERGENCY TARGET</b><br>${inc.micro_location || ''}`).openPopup();
+
+        map.fitBounds([[responderLat, responderLng], [inc.lat, inc.lng]], { padding: [40, 40] });
+        updateProximityMetrics();
+    }
+
+    // --- 4. WebSocket Telemetry Receiver ---
+    async function initWebSocket() {
+        // Obtain Responder JWT token
+        const res = await fetch('/api/auth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: responderId, role: 'responder' })
+        });
+        const data = await res.json();
+        const token = data.access_token;
+
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${proto}//${location.host}/api/emergency/ws?token=${token}`);
+
+        ws.onopen = () => {
+            document.getElementById('wsStatusBadge').className = 'badge bg-success-subtle text-success border border-success px-3 py-2';
+            document.getElementById('wsStatusBadge').innerText = '● Live Radar';
+        };
+
+        ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'NEW_SOS' || msg.type === 'NEW_INCIDENT') {
+                if (!activeIncident) {
+                    bindActiveIncident({
+                        id: msg.incident_id,
+                        emergency_type: msg.emergency_type || msg.category,
+                        lat: msg.lat || msg.latitude,
+                        lng: msg.lon || msg.longitude,
+                        micro_location: msg.micro_location,
+                        victim_phone: msg.victim_phone
+                    });
+                }
+            } else if (msg.type === 'HANDSHAKE_UPDATE') {
+                const badge = document.getElementById('targetHandshake');
+                badge.className = msg.handshake_status === 'confirmed_safe' ? 'badge bg-success' : 'badge bg-danger';
+                badge.innerText = msg.handshake_status;
+            } else if (msg.type === 'INCIDENT_RESOLVED_ALL') {
+                if (activeIncident && activeIncident.id === msg.incident_id) {
+                    clearActiveTarget();
+                }
+            }
+        };
+    }
+
+    // --- 5. Submit Geofence-Locked Resolution ---
+    async function submitGeofenceResolution() {
+        if (!activeIncident) return;
+
+        try {
+            const res = await fetch('/api/emergency/resolve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    incident_id: activeIncident.id,
+                    responder_id: responderId,
+                    responder_lat: responderLat,
+                    responder_lon: responderLng
+                })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                alert(`✅ Target Cleared! Geofence verified at ${data.distance_meters}m. Karma +${data.karma_awarded}`);
+                document.getElementById('karmaPoints').innerText = parseInt(document.getElementById('karmaPoints').innerText) + 15;
+                clearActiveTarget();
+            } else {
+                alert(`Error: ${data.detail}`);
+            }
+        } catch (err) {
+            console.error("Resolution failed:", err);
+        }
+    }
+
+    function abortDispatch() {
+        if (confirm("Release this target back to the dispatch network?")) {
+            if (ws && activeIncident) {
+                ws.send(JSON.stringify({ action: 'RELEASE_INCIDENT', incident_id: activeIncident.id, victim_id: activeIncident.victim_phone }));
+            }
+            clearActiveTarget();
+        }
+    }
+
+    function clearActiveTarget() {
+        activeIncident = null;
+        document.getElementById('activeStatusPill').className = "badge bg-secondary";
+        document.getElementById('activeStatusPill').innerText = "Standby";
+        document.getElementById('targetCategory').innerText = "-";
+        document.getElementById('targetMicro').innerText = "-";
+        document.getElementById('targetPhone').innerText = "-";
+        document.getElementById('distVal').innerText = "No Target";
+        document.getElementById('hudDistanceDisplay').innerText = "-- m";
+        document.getElementById('nativeMapBtn').classList.add('disabled');
+        document.getElementById('resolveGeofenceBtn').className = "btn btn-danger fw-bold py-2 disabled";
+        document.getElementById('resolveGeofenceBtn').innerHTML = '<i class="bi bi-lock-fill me-1"></i> Locked (> 50m)';
+        if (victimMarker) map.removeLayer(victimMarker);
+        if (activePolyline) map.removeLayer(activePolyline);
+    }
+
+    window.onload = () => {
+        initTacticalRadar();
+        initWebSocket();
+        
+        // Auto-fetch current active incidents if any exist
+        fetch('/api/emergency/active-incidents')
+            .then(r => r.json())
+            .then(list => {
+                if (list.length > 0) {
+                    const first = list[0];
+                    bindActiveIncident({
+                        id: first.incident_id,
+                        emergency_type: first.emergency_type,
+                        lat: first.lat,
+                        lng: first.lon,
+                        micro_location: first.micro_location,
+                        victim_phone: first.victim_phone
+                    });
+                }
+            });
+    };
+</script>
+</body>
+</html>

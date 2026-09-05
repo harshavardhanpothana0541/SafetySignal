@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafetySignal | AIOps Telemetry & CAD 112 Command Center</title>
+    
+    <!-- Bootstrap 5 & Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- Chart.js CDN for Live SRE Metrics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg-dark: #080c16;
+            --card-bg: #0f172a;
+            --border-color: #1e293b;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: #f1f5f9;
+            font-family: system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+
+        .hud-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+        }
+
+        /* Virtual Keypad Feature Phone Styling */
+        .virtual-phone {
+            background: #1e293b;
+            border: 4px solid #334155;
+            border-radius: 28px;
+            padding: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+            max-width: 300px;
+            margin: auto;
+        }
+
+        .phone-screen {
+            background: #84cc16;
+            color: #14532d;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            padding: 8px 10px;
+            border-radius: 8px;
+            height: 80px;
+            border: 2px solid #65a30d;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .keypad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .key-btn {
+            background: #0f172a;
+            color: #f8fafc;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            padding: 8px;
+            font-weight: bold;
+            font-size: 1rem;
+            transition: all 0.1s;
+        }
+
+        .key-btn:active {
+            transform: scale(0.92);
+            background: #334155;
+        }
+
+        #logConsole {
+            background: #020617;
+            color: #22c55e;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.75rem;
+            height: 185px;
+            overflow-y: auto;
+            border-radius: 8px;
+            padding: 10px;
+            border: 1px solid #1e293b;
+        }
+    </style>
+</head>
+<body class="p-3">
+
+<div class="container-fluid px-lg-4">
+    <!-- Topbar -->
+    <header class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary border-opacity-25">
+        <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-shield-shaded text-danger fs-3"></i>
+            <div>
+                <h5 class="mb-0 fw-bold">SafetySignal AIOps Command & 112 CAD Center</h5>
+                <small class="text-secondary">Multi-Channel Telemetry Ingestion, Time-Window Correlation & Self-Healing Bot</small>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Victim Portal</a>
+            <a href="/responder" class="btn btn-sm btn-outline-info"><i class="bi bi-person-badge me-1"></i>Responder HUD</a>
+        </div>
+    </header>
+
+    <!-- SECTION 1: LIVE SRE METRICS STREAM & LOG CONSOLE -->
+    <div class="row g-3 mb-3">
+        <div class="col-lg-7">
+            <div class="hud-card p-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold mb-0 text-info"><i class="bi bi-activity me-2"></i>Live Infrastructure Telemetry Stream (CPU & Memory)</h6>
+                    <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-50">WebSocket Connected</span>
+                </div>
+                <div style="height: 190px;">
+                    <canvas id="metricsChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="hud-card p-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold mb-0 text-success"><i class="bi bi-terminal-fill me-2"></i>Ingested Unstructured Logs Stream</h6>
+                    <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="clearLogConsole()">Clear</button>
+                </div>
+                <div id="logConsole">> Awaiting incoming telemetry stream from simulator...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SECTION 2: CAD COUNTERS & INCIDENTS & KEYPAD SIMULATOR -->
+    <div class="row g-3">
+        <!-- Left: CAD Counters & Self-Healing Incident Action Feed -->
+        <div class="col-lg-8">
+            <!-- CAD Metric Counter Cards -->
+            <div class="row g-2 mb-3">
+                <div class="col-3">
+                    <div class="hud-card p-3 text-center">
+                        <small class="text-secondary text-uppercase fw-bold" style="font-size: 0.7rem;">Total Incidents</small>
+                        <h3 class="fw-bold text-white mb-0" id="cadTotal">0</h3>
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="hud-card p-3 text-center">
+                        <small class="text-secondary text-uppercase fw-bold" style="font-size: 0.7rem;">Active / In-Flight</small>
+                        <h3 class="fw-bold text-danger mb-0" id="cadActive">0</h3>
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="hud-card p-3 text-center">
+                        <small class="text-secondary text-uppercase fw-bold" style="font-size: 0.7rem;">Telephony Ingests</small>
+                        <h3 class="fw-bold text-warning mb-0" id="cadTelephony">0</h3>
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="hud-card p-3 text-center">
+                        <small class="text-secondary text-uppercase fw-bold" style="font-size: 0.7rem;">Resolved / Healed</small>
+                        <h3 class="fw-bold text-success mb-0" id="cadResolved">0</h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Incident Real-Time Table with Allow-List Auto-Remediation Controls -->
+            <div class="hud-card p-3 mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold mb-0 text-warning"><i class="bi bi-lightning-charge-fill me-2"></i>Correlated Incidents & Safe Remediation Gate</h6>
+                    <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="refreshAdminFeed()"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0 align-middle small">
+                        <thead>
+                            <tr class="text-secondary">
+                                <th>ID</th>
+                                <th>Target / Caller</th>
+                                <th>Severity</th>
+                                <th>Root Cause / Micro-Location</th>
+                                <th>Status</th>
+                                <th style="min-width: 170px;">Remediation Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cadTableBody">
+                            <tr><td colspan="6" class="text-center text-secondary py-3">Loading live incidents...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Virtual Feature Phone (Keypad / Missed Call / SMS Simulator) -->
+        <div class="col-lg-4">
+            <div class="hud-card p-3">
+                <div class="text-center mb-2">
+                    <span class="badge bg-danger mb-1">Hardware Fallback Simulator</span>
+                    <h6 class="fw-bold mb-0 text-light">Zero-Balance Feature Phone</h6>
+                    <small class="text-secondary" style="font-size: 0.75rem;">Simulate 1-ring missed call and 2-way SMS verification</small>
+                </div>
+
+                <!-- Virtual Device Frame -->
+                <div class="virtual-phone">
+                    <div class="phone-screen">
+                        <div class="d-flex justify-content-between" style="font-size: 0.65rem;">
+                            <span>📶 2G GSM</span>
+                            <span>BAT 95%</span>
+                        </div>
+                        <div id="phoneDisplay" class="text-end text-truncate fs-6">1800-SAFETY</div>
+                        <div id="phoneSubtext" class="text-start" style="font-size: 0.65rem;">Toll-Free SOS Line</div>
+                    </div>
+
+                    <div class="keypad-grid">
+                        <button class="btn key-btn" onclick="pressKey('1')">1</button>
+                        <button class="btn key-btn" onclick="pressKey('2')">2</button>
+                        <button class="btn key-btn" onclick="pressKey('3')">3</button>
+                        <button class="btn key-btn" onclick="pressKey('4')">4</button>
+                        <button class="btn key-btn" onclick="pressKey('5')">5</button>
+                        <button class="btn key-btn" onclick="pressKey('6')">6</button>
+                        <button class="btn key-btn" onclick="pressKey('7')">7</button>
+                        <button class="btn key-btn" onclick="pressKey('8')">8</button>
+                        <button class="btn key-btn" onclick="pressKey('9')">9</button>
+                        <button class="btn key-btn text-warning" onclick="pressKey('*')">*</button>
+                        <button class="btn key-btn" onclick="pressKey('0')">0</button>
+                        <button class="btn key-btn text-warning" onclick="pressKey('#')">#</button>
+                    </div>
+
+                    <!-- Simulator Action Buttons -->
+                    <div class="d-grid gap-2 mt-3">
+                        <button class="btn btn-success btn-sm fw-bold" onclick="simulateMissedCall()">
+                            <i class="bi bi-telephone-fill me-1"></i> Trigger 1-Ring Missed Call
+                        </button>
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="smsInput" class="form-control bg-dark text-white border-secondary" placeholder="Reply '1' (Safe) or '0' (Help)">
+                            <button class="btn btn-info fw-bold" onclick="simulateSmsReply()">Send SMS</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-3 p-2 bg-dark rounded border border-secondary border-opacity-25 small text-secondary">
+                    <strong>Simulated Caller:</strong> <code>+919876543210</code><br>
+                    <strong>Registered Home Base:</strong> Tower B, Flat 402
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const callerPhone = "+919876543210";
+
+    // 1. Setup Live Chart.js for SRE Telemetry
+    const ctx = document.getElementById('metricsChart').getContext('2d');
+    const metricsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: ['10:00:00', '10:00:02', '10:00:04', '10:00:06', '10:00:08'],
+            datasets: [
+                {
+                    label: 'Memory Usage (%)',
+                    data: [42, 45, 58, 62, 70],
+                    borderColor: '#f43f5e',
+                    backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                },
+                {
+                    label: 'CPU Usage (%)',
+                    data: [25, 30, 32, 48, 55],
+                    borderColor: '#38bdf8',
+                    backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { min: 0, max: 100, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+                x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+            },
+            plugins: {
+                legend: { labels: { color: '#f8fafc', font: { size: 11 } } }
+            }
+        }
+    });
+
+    // 2. Setup WebSocket Live Streaming
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let socket = null;
+
+    function initWebSocket() {
+        socket = new WebSocket(`${wsProtocol}//${window.location.host}/api/emergency/ws?token=mock_admin_token`);
+
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                const logBox = document.getElementById('logConsole');
+
+                if (data.type === 'METRIC_STREAM') {
+                    metricsChart.data.labels.push(data.data.time);
+                    if (metricsChart.data.labels.length > 12) metricsChart.data.labels.shift();
+                    
+                    if (data.data.metric.includes('memory')) {
+                        metricsChart.data.datasets[0].data.push(data.data.value);
+                        if (metricsChart.data.datasets[0].data.length > 12) metricsChart.data.datasets[0].data.shift();
+                    } else {
+                        metricsChart.data.datasets[1].data.push(data.data.value);
+                        if (metricsChart.data.datasets[1].data.length > 12) metricsChart.data.datasets[1].data.shift();
+                    }
+                    metricsChart.update();
+                }
+
+                if (data.type === 'LOG_STREAM') {
+                    const color = data.data.level === 'FATAL' || data.data.level === 'ERROR' ? '#f43f5e' : '#22c55e';
+                    logBox.innerHTML += `<div style="color: ${color}">[${data.data.time}] [${data.data.level}] ${data.data.service}: ${data.data.message}</div>`;
+                    logBox.scrollTop = logBox.scrollHeight;
+                }
+
+                if (data.type === 'NEW_INCIDENT' || data.type === 'NEW_AIOPS_INCIDENT' || data.type === 'INCIDENT_RESOLVED_ALL' || data.type === 'SLA_BREACH_ESCALATION') {
+                    refreshAdminFeed();
+                }
+            } catch (e) {
+                console.warn("[WS Parse Warning]", e);
+            }
+        };
+
+        socket.onclose = () => {
+            setTimeout(initWebSocket, 3000);
+        };
+    }
+
+    function clearLogConsole() {
+        document.getElementById('logConsole').innerHTML = '> Telemetry console cleared.';
+    }
+
+    // 3. Virtual Keypad Logic
+    function pressKey(key) {
+        const display = document.getElementById('phoneDisplay');
+        if (display.innerText === '1800-SAFETY' || display.innerText.startsWith('SOS') || display.innerText === 'DISPATCHED') {
+            display.innerText = key;
+        } else {
+            display.innerText += key;
+        }
+    }
+
+    async function simulateMissedCall() {
+        const subtext = document.getElementById('phoneSubtext');
+        subtext.innerText = "Dialing 1800-SAFETY... (1 Ring)";
+        
+        try {
+            const res = await fetch('/api/telephony/missed-call', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ caller_phone: callerPhone })
+            });
+            const data = await res.json();
+            
+            subtext.innerText = "Call Dropped (0 Balance Charged)";
+            document.getElementById('phoneDisplay').innerText = "DISPATCHED";
+            alert(`🚨 Missed Call Captured! Ticket #${data.incident_id} auto-created for registered base: ${data.micro_location}`);
+            refreshAdminFeed();
+        } catch (e) {
+            subtext.innerText = "Connection error";
+        }
+    }
+
+    async function simulateSmsReply() {
+        const text = document.getElementById('smsInput').value.trim();
+        if (!text) return;
+
+        try {
+            const res = await fetch('/api/telephony/sms-reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ caller_phone: callerPhone, message_body: text })
+            });
+            const data = await res.json();
+            alert(`SMS Handshake Received: Status -> ${data.handshake_status}`);
+            document.getElementById('smsInput').value = '';
+            refreshAdminFeed();
+        } catch (e) {
+            alert("Error sending SMS simulation");
+        }
+    }
+
+    // 4. Safe Auto-Remediation (Dry-Run Preview vs. Real Execution)
+    async function triggerRemediation(incidentId, dryRun) {
+        try {
+            const res = await fetch('/api/aiops/remediate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ incident_id: incidentId, action: 'RESTART_POD', dry_run: dryRun })
+            });
+            const result = await res.json();
+
+            if (dryRun) {
+                alert(`🛡️ [DRY-RUN / MANUAL APPROVAL PREVIEW]\nAction Proposed: ${result.action_proposed}\nAllow-List Command: ${result.command_to_execute}\nScope: ${result.description}\nTarget Service: ${result.service}`);
+            } else {
+                alert(`⚡ [AUTO-REMEDIATION EXECUTED]\nStatus: ${result.status}\nCommand Executed: ${result.executed_command}\nAudit Log: Immutable record written to database.`);
+                refreshAdminFeed();
+            }
+        } catch (err) {
+            alert("Error invoking remediation endpoint");
+        }
+    }
+
+    // 5. Refresh Feed & Populate Incidents Table
+    async function refreshAdminFeed() {
+        try {
+            const res = await fetch('/api/emergency/analytics');
+            if (!res.ok) return;
+            const data = await res.json();
+
+            document.getElementById('cadTotal').innerText = data.total || 0;
+            document.getElementById('cadActive').innerText = data.active || 0;
+            document.getElementById('cadResolved').innerText = data.resolved || 0;
+
+            let telephonyCount = 0;
+            const tbody = document.getElementById('cadTableBody');
+            
+            if (data.all_incidents && data.all_incidents.length > 0) {
+                tbody.innerHTML = data.all_incidents.map(inc => {
+                    const isTelephony = inc.micro_location && (inc.micro_location.includes("Registered") || inc.micro_location.includes("Tower") || inc.micro_location.includes("Flat"));
+                    if (isTelephony) telephonyCount++;
+
+                    const isResolved = inc.status === "resolved";
+                    const isSlaBreached = inc.status && inc.status.includes("ESCALATED");
+
+                    return `
+                        <tr>
+                            <td class="fw-bold ${isSlaBreached ? 'text-danger' : 'text-warning'}">#${inc.id}</td>
+                            <td><code>${inc.victim_id || callerPhone}</code></td>
+                            <td><span class="badge ${isSlaBreached ? 'bg-danger' : (isResolved ? 'bg-success' : 'bg-primary')}">${isSlaBreached ? 'P0-SLA-BREACH' : (inc.emergency_type || 'Critical')}</span></td>
+                            <td style="max-width: 280px;" class="text-truncate" title="${inc.micro_location}">${inc.micro_location || 'GPS Pin'}</td>
+                            <td><span class="badge ${isResolved ? 'bg-success' : 'bg-secondary'}">${inc.status}</span></td>
+                            <td>
+                                ${!isResolved ? `
+                                    <button class="btn btn-outline-warning btn-sm py-0 px-2 fw-semibold" onclick="triggerRemediation(${inc.id}, true)">
+                                        <i class="bi bi-eye me-1"></i>Dry Run
+                                    </button>
+                                    <button class="btn btn-success btn-sm py-0 px-2 fw-semibold" onclick="triggerRemediation(${inc.id}, false)">
+                                        <i class="bi bi-tools me-1"></i>Heal
+                                    </button>
+                                ` : `<span class="text-success small"><i class="bi bi-check-circle-fill me-1"></i>Audit Locked</span>`}
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-secondary py-3">No incident tickets logged.</td></tr>';
+            }
+            document.getElementById('cadTelephony').innerText = telephonyCount;
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    window.onload = () => {
+        initWebSocket();
+        refreshAdminFeed();
+        setInterval(refreshAdminFeed, 4000);
+    };
+</script>
+</body>
+</html>

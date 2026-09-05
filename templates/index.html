@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SafetySignal | Emergency Dispatch & Autonomous SOS HUD</title>
+    
+    <!-- PWA Manifest & Mobile Standalone Tags -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#dc2626">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1032/1032989.png">
+
+    <!-- Bootstrap 5 & Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <style>
+        :root {
+            --bg-dark: #0a0f1d;
+            --card-bg: #111827;
+            --card-border: #1f2937;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-yellow: #f59e0b;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: #f3f4f6;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-tabs {
+            border-bottom: 2px solid var(--card-border);
+        }
+
+        .nav-tabs .nav-link {
+            color: #9ca3af;
+            border: none;
+            padding: 12px 24px;
+            font-weight: 600;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .nav-tabs .nav-link.active {
+            color: var(--accent-blue);
+            background: transparent;
+            border-bottom: 3px solid var(--accent-blue);
+        }
+
+        .hud-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .stat-card {
+            padding: 1.25rem;
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+            background: #161f30;
+        }
+
+        /* Pulse Animated SOS Button */
+        .sos-wrapper {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .sos-pulse-ring {
+            position: absolute;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            border: 3px solid rgba(239, 68, 68, 0.4);
+            animation: pulsate 2s infinite ease-out;
+            z-index: 1;
+        }
+
+        @keyframes pulsate {
+            0% { transform: scale(0.85); opacity: 0.8; }
+            100% { transform: scale(1.35); opacity: 0; }
+        }
+
+        .sos-circle {
+            position: relative;
+            z-index: 2;
+            width: 175px;
+            height: 175px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #ef4444 0%, #b91c1c 100%);
+            border: 5px solid rgba(254, 202, 202, 0.6);
+            box-shadow: 0 0 40px rgba(239, 68, 68, 0.5);
+            color: white;
+            font-size: 2rem;
+            font-weight: 900;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .sos-circle:hover {
+            transform: scale(1.04);
+            box-shadow: 0 0 55px rgba(239, 68, 68, 0.8);
+        }
+
+        .sos-circle:active {
+            transform: scale(0.94);
+        }
+
+        #incidentMap {
+            height: 480px;
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+            z-index: 1;
+        }
+
+        .badge-active { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid #ef4444; }
+        .badge-accepted { background-color: rgba(245, 158, 11, 0.2); color: #fde68a; border: 1px solid #f59e0b; }
+        .badge-resolved { background-color: rgba(16, 185, 129, 0.2); color: #a7f3d0; border: 1px solid #10b981; }
+    </style>
+</head>
+<body class="py-3">
+
+<div class="container-fluid px-lg-5">
+    <!-- Navbar Header -->
+    <header class="d-flex justify-content-between align-items-center mb-3 pb-3 border-bottom border-secondary border-opacity-25">
+        <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-shield-fill-exclamation text-danger fs-2"></i>
+            <div>
+                <h4 class="mb-0 fw-bold">SafetySignal HUD</h4>
+                <small class="text-secondary">Universal High-Availability Emergency Dispatch</small>
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <!-- Active Session User Badge / Logout -->
+            <div id="userSessionDisplay" class="d-none align-items-center gap-2 bg-dark border border-secondary rounded-pill px-3 py-1">
+                <i class="bi bi-person-badge-fill text-warning"></i>
+                <small id="sessionUserLabel" class="fw-semibold text-light">Responder</small>
+                <button class="btn btn-link btn-sm text-danger p-0 ms-1 text-decoration-none" title="Log Out" onclick="logoutSession()">
+                    <i class="bi bi-box-arrow-right"></i>
+                </button>
+            </div>
+
+            <span id="pwaNetBadge" class="badge bg-success border border-success px-3 py-2">
+                <i class="bi bi-wifi me-1"></i> <span id="pwaNetText">Online</span>
+            </span>
+            <span id="connStatus" class="badge rounded-pill bg-success-subtle text-success border border-success px-3 py-2">
+                <i class="bi bi-circle-fill me-1" style="font-size: 8px;"></i> Live Connected
+            </span>
+        </div>
+    </header>
+
+    <!-- PWA Installation Alert Bar -->
+    <div id="pwaInstallBanner" class="alert alert-warning d-flex justify-content-between align-items-center py-2 px-3 mb-3 border-warning border-opacity-50" style="display: none !important;">
+        <span class="small fw-semibold"><i class="bi bi-phone-arrow-down me-2"></i>Install SafetySignal to your home screen for instant offline panic access.</span>
+        <button id="pwaInstallBtn" class="btn btn-sm btn-dark fw-bold px-3">Install App</button>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs mb-4" id="mainTabs">
+        <li class="nav-item">
+            <button class="nav-link active" onclick="switchView('victim')">
+                <i class="bi bi-broadcast me-1"></i> Victim Console
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" onclick="switchView('responder')">
+                <i class="bi bi-person-badge-fill me-1"></i> Responder View 
+                <i id="responderLockIcon" class="bi bi-lock-fill ms-1 text-warning small opacity-75"></i>
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" onclick="switchView('admin')">
+                <i class="bi bi-speedometer2 me-1"></i> Admin & CAD 112 
+                <i id="adminLockIcon" class="bi bi-lock-fill ms-1 text-danger small opacity-75"></i>
+            </button>
+        </li>
+    </ul>
+
+    <!-- 1. VICTIM CONSOLE -->
+    <section id="victimView">
+        <div class="row justify-content-center">
+            <div class="col-md-7 col-lg-5 text-center">
+                <div class="hud-card p-4 mb-3">
+                    
+                    <!-- AI Rapid Incident Triage Assistant -->
+                    <div class="mb-3 text-start">
+                        <label class="form-label text-secondary fw-semibold small mb-1">
+                            <i class="bi bi-stars text-info me-1"></i>AI RAPID INCIDENT TRIAGE
+                        </label>
+                        <div class="input-group">
+                            <input type="text" id="aiTriageInput" class="form-control bg-dark text-white border-secondary small" placeholder="e.g. Severe chest pain, Tower B Flat 402...">
+                            <button class="btn btn-outline-info" type="button" onclick="runAiTriage()">
+                                <i class="bi bi-cpu me-1"></i>Analyze
+                            </button>
+                        </div>
+                        <small id="aiTriageFeedback" class="text-info d-block mt-1" style="font-size: 0.75rem;"></small>
+                    </div>
+
+                    <label class="form-label text-secondary fw-semibold small mb-2">EMERGENCY CATEGORY</label>
+                    <select id="victimCategory" class="form-select bg-dark text-white border-secondary mb-3 text-center">
+                        <option value="Cardiac / Medical">❤️ Medical / Cardiac Arrest</option>
+                        <option value="Trauma / Accident">🩸 Trauma / Road Accident</option>
+                        <option value="Fire / Hazard">🔥 Fire / Chemical Hazard</option>
+                        <option value="Security / Threat">🚨 Security / Assault Alert</option>
+                    </select>
+
+                    <!-- Pulse SOS Panic Button -->
+                    <div class="sos-wrapper">
+                        <div class="sos-pulse-ring"></div>
+                        <button class="sos-circle d-flex flex-column align-items-center justify-content-center" onclick="triggerDualModeSOS()">
+                            <i class="bi bi-exclamation-octagon-fill mb-1" style="font-size: 1.6rem;"></i>
+                            SOS
+                        </button>
+                    </div>
+
+                    <div class="small text-secondary mt-2">
+                        <i class="bi bi-geo-alt-fill text-danger me-1"></i>
+                        <span id="gpsDisplay">Acquiring GPS fix...</span>
+                    </div>
+                </div>
+
+                <!-- Last-Yard Micro-Location & Siren Beacon -->
+                <div class="hud-card p-3 mb-3 text-start">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-warning small text-uppercase fw-bold"><i class="bi bi-pin-map-fill me-1"></i>Saved Base Micro-Location</span>
+                        <button id="sirenBtn" class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size: 0.75rem;" onclick="toggleAcousticBeacon()">
+                            <i class="bi bi-volume-up-fill me-1"></i>Siren Beacon
+                        </button>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <input type="text" id="bldgInput" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Building/Tower" value="Tower B">
+                        </div>
+                        <div class="col-6">
+                            <input type="text" id="flatInput" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Floor / Flat No" value="Flat 402">
+                        </div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-8">
+                            <input type="text" id="iceInput" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="ICE / Helpline Phone" value="+919876543210">
+                        </div>
+                        <div class="col-4">
+                            <button class="btn btn-sm btn-secondary w-100 fw-semibold" onclick="saveProfileCache()">Save Base</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="victimAlertBox" class="alert alert-dark border-secondary d-none text-start" role="alert">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="spinner-grow spinner-grow-sm text-danger" role="status"></div>
+                        <span id="victimAlertText">SOS Dispatched. Alerting responder network...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. RESPONDER VIEW -->
+    <section id="responderView" class="d-none">
+        <div class="row g-3">
+            <div class="col-lg-8">
+                <div class="hud-card p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-bold small"><i class="bi bi-map me-1 text-danger"></i> Tactical Incident Map (OpenStreetMap)</span>
+                        <div class="d-flex gap-2 align-items-center">
+                            <button class="btn btn-xs btn-outline-warning py-0 px-2" style="font-size: 0.75rem;" onclick="simulateResponderApproach()">
+                                <i class="bi bi-play-circle me-1"></i>Simulate Approach
+                            </button>
+                            <span class="text-secondary small" id="mapStatus">Ready</span>
+                        </div>
+                    </div>
+                    <div id="incidentMap"></div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="hud-card p-3 h-100">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-bell-fill text-warning me-2"></i>Active Incoming Dispatches</h6>
+                    <div id="responderQueue" class="d-flex flex-column gap-2 overflow-auto" style="max-height: 440px;">
+                        <p class="text-secondary small text-center my-auto py-4">No active incident signals in your area.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. ADMIN & ANALYTICS DASHBOARD -->
+    <section id="adminView" class="d-none">
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="text-secondary mb-1 small fw-semibold">TOTAL DISPATCHED</p>
+                            <h2 class="fw-bold text-white mb-0" id="statTotal">0</h2>
+                        </div>
+                        <i class="bi bi-folder-fill fs-1 text-primary opacity-50"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="text-secondary mb-1 small fw-semibold">ACTIVE / IN-PROGRESS</p>
+                            <h2 class="fw-bold text-danger mb-0" id="statActive">0</h2>
+                        </div>
+                        <i class="bi bi-lightning-charge-fill fs-1 text-danger opacity-50"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="text-secondary mb-1 small fw-semibold">UNACCEPTED (> 2 HRS)</p>
+                            <h2 class="fw-bold text-warning mb-0" id="statUnaccepted">0</h2>
+                        </div>
+                        <i class="bi bi-shield-exclamation fs-1 text-warning opacity-50"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="text-secondary mb-1 small fw-semibold">RESOLVED CASES</p>
+                            <h2 class="fw-bold text-success mb-0" id="statResolved">0</h2>
+                        </div>
+                        <i class="bi bi-check-circle-fill fs-1 text-success opacity-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Unaccepted & Statutory Escalated Incidents Table -->
+        <div class="hud-card p-3 mb-4 border-warning border-opacity-50">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="fw-bold mb-0 text-warning">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>Escalated Cases (Statutory 112 CAD Forwarded)
+                </h6>
+                <span class="badge bg-warning text-dark">Automated Municipal Handoff</span>
+            </div>
+            <p class="text-secondary small mb-3">Requests unattended within the safety window or dispatched via zero-data missed calls.</p>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0 align-middle">
+                    <thead>
+                        <tr class="text-secondary small">
+                            <th>ID</th>
+                            <th>Category</th>
+                            <th>Micro-Location / Coords</th>
+                            <th>Dispatch Status</th>
+                            <th>Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="unacceptedTableBody">
+                        <tr><td colspan="5" class="text-center text-secondary py-2">No unaccepted/escalated cases.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Master Incident History -->
+        <div class="hud-card p-3">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="fw-bold mb-0"><i class="bi bi-table me-2 text-info"></i>Recorded Incident History & Audit Trail</h6>
+                <button class="btn btn-sm btn-outline-secondary" onclick="fetchAnalytics()"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0 align-middle">
+                    <thead>
+                        <tr class="text-secondary small">
+                            <th>ID</th>
+                            <th>Category</th>
+                            <th>Micro-Location / Coords</th>
+                            <th>Status</th>
+                            <th>Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminTableBody">
+                        <tr><td colspan="5" class="text-center text-secondary py-3">Loading historical data...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Secure Auth Modal for Responder & Admin -->
+    <div class="modal fade" id="authModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark text-white border-secondary">
+          <div class="modal-header border-secondary">
+            <h5 class="modal-title fw-bold" id="authModalTitle">
+              <i class="bi bi-shield-lock-fill text-warning me-2"></i>Restricted Access
+            </h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" onclick="cancelAuthModal()"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-secondary small mb-3">
+              This portal requires verified credentials. Victims do not need to log in.
+            </p>
+            <div id="authAlert" class="alert alert-danger d-none py-2 small"></div>
+            <div class="mb-3">
+              <label class="form-label small text-secondary">Username</label>
+              <input type="text" id="authUsername" class="form-control bg-black text-white border-secondary" placeholder="e.g. responder1 or admin">
+            </div>
+            <div class="mb-3">
+              <label class="form-label small text-secondary">Password</label>
+              <input type="password" id="authPassword" class="form-control bg-black text-white border-secondary" placeholder="Enter password">
+            </div>
+            <div class="p-2 rounded bg-secondary bg-opacity-10 border border-secondary border-opacity-25 small text-secondary">
+              <strong>Demo Credentials:</strong><br>
+              • Responder: <code>responder1</code> / <code>password123</code><br>
+              • Admin: <code>admin</code> / <code>admin123</code>
+            </div>
+          </div>
+          <div class="modal-footer border-secondary">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" onclick="cancelAuthModal()">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm fw-bold px-3" onclick="submitAuthLogin()">Authenticate</button>
+          </div>
+        </div>
+      </div>
+    </div>
+</div>
+
+<!-- Leaflet JS & Bootstrap Bundle -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    let currentRole = 'victim';
+    let userId = 'client_' + Math.floor(Math.random() * 9000 + 1000);
+    let ws = null;
+    let lat = 16.5062, lon = 80.6480;
+    let map = null;
+    let markers = {};
+    let currentToken = null;
+    let simInterval = null;
+    let simVehicleMarker = null;
+
+    // --- 1. LocalStorage Micro-Location Management ---
+    function initProfileCache() {
+        const saved = JSON.parse(localStorage.getItem('safetysignal_profile'));
+        if (saved) {
+            if (saved.building) document.getElementById('bldgInput').value = saved.building;
+            if (saved.flat) document.getElementById('flatInput').value = saved.flat;
+            if (saved.ice) document.getElementById('iceInput').value = saved.ice;
+        }
+    }
+
+    function saveProfileCache() {
+        const profile = {
+            building: document.getElementById('bldgInput').value.trim(),
+            flat: document.getElementById('flatInput').value.trim(),
+            ice: document.getElementById('iceInput').value.trim()
+        };
+        localStorage.setItem('safetysignal_profile', JSON.stringify(profile));
+        alert("Base micro-location cached for zero-friction emergency triggers.");
+    }
+
+    // --- 2. Network Awareness Monitor & PWA Banner ---
+    function updateNetworkStatus() {
+        const badge = document.getElementById('pwaNetBadge');
+        const text = document.getElementById('pwaNetText');
+        if (navigator.onLine) {
+            badge.className = "badge bg-success border border-success px-3 py-2";
+            text.innerText = "Online (PWA)";
+        } else {
+            badge.className = "badge bg-danger border border-danger px-3 py-2";
+            text.innerText = "Offline (SMS Mode)";
+        }
+    }
+    window.addEventListener('online', () => { updateNetworkStatus(); connectWS(); flushPendingQueue(); });
+    window.addEventListener('offline', updateNetworkStatus);
+
+    // PWA Install Prompt
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        const banner = document.getElementById('pwaInstallBanner');
+        if (banner) banner.style.setProperty('display', 'flex', 'important');
+    });
+
+    document.getElementById('pwaInstallBtn')?.addEventListener('click', async () => {
+        if (deferredPrompt) {
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            if (outcome === 'accepted') {
+                document.getElementById('pwaInstallBanner').style.setProperty('display', 'none', 'important');
+            }
+            deferredPrompt = null;
+        }
+    });
+
+    // --- 3. JWT Token Acquisition & WebSocket Connection ---
+    async function getAuthToken(role) {
+        try {
+            const res = await fetch('/api/auth/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, role: role })
+            });
+            const data = await res.json();
+            currentToken = data.access_token;
+            return currentToken;
+        } catch (err) {
+            console.error("Token acquisition failed:", err);
+            return null;
+        }
+    }
+
+    async function connectWS() {
+        const token = await getAuthToken(currentRole);
+        if (!token) return;
+
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${proto}//${window.location.host}/api/emergency/ws?token=${token}`);
+
+        ws.onopen = () => {
+            const badge = document.getElementById('connStatus');
+            badge.className = "badge rounded-pill bg-success-subtle text-success border border-success px-3 py-2";
+            badge.innerHTML = `<i class="bi bi-circle-fill me-1" style="font-size: 8px;"></i> Live Connected (${currentRole.toUpperCase()})`;
+            
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'UPDATE_LOCATION', lat: lat, lon: lon }));
+            }
+            flushPendingQueue();
+        };
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'NEW_SOS' || msg.type === 'EMERGENCY_ALERT' || msg.type === 'NEW_INCIDENT') {
+                handleNewIncident(msg);
+            } else if (msg.type === 'INCIDENT_CLAIMED') {
+                if (msg.assigned_responder_id === userId) {
+                    handleNewIncident({ ...msg, status: 'accepted' });
+                } else {
+                    const otherCard = document.getElementById(`inc-card-${msg.incident_id}`);
+                    if (otherCard) otherCard.remove();
+                    if (markers[msg.incident_id]) {
+                        map.removeLayer(markers[msg.incident_id]);
+                        delete markers[msg.incident_id];
+                    }
+                }
+            } else if (msg.type === 'INCIDENT_RESOLVED_ALL') {
+                const card = document.getElementById(`inc-card-${msg.incident_id}`);
+                if (card) card.remove();
+                if (markers[msg.incident_id]) {
+                    map.removeLayer(markers[msg.incident_id]);
+                    delete markers[msg.incident_id];
+                }
+            } else if (msg.type === 'LOCATION_STREAM') {
+                handleLiveMarkerUpdate(msg);
+            } else if (msg.type === 'HELP_ON_THE_WAY') {
+                document.getElementById('victimAlertBox').classList.remove('d-none');
+                document.getElementById('victimAlertText').innerText = `🚨 Responder (${msg.responder_id}) has accepted and is en route!`;
+            } else if (msg.type === 'RESPONDER_ABORTED' || msg.type === 'RESPONDER_TIMEOUT_REASSIGNING') {
+                document.getElementById('victimAlertBox').classList.remove('d-none');
+                document.getElementById('victimAlertText').innerText = `⚠️ ${msg.message}`;
+            } else if (msg.type === 'ACCOUNT_SUSPENDED') {
+                alert(`🚨 Action Denied: ${msg.message}`);
+            } else if (msg.type === 'GEOFENCE_LOCK_ACTIVE') {
+                alert(`🔒 Geofence Lock Active: ${msg.message}`);
+            } else if (msg.type === 'INCIDENT_RESOLVED') {
+                document.getElementById('victimAlertBox').classList.remove('d-none');
+                document.getElementById('victimAlertText').innerText = "✅ Incident marked as RESOLVED. Situation cleared.";
+            }
+        };
+
+        ws.onclose = () => {
+            const badge = document.getElementById('connStatus');
+            badge.className = "badge rounded-pill bg-danger-subtle text-danger border border-danger px-3 py-2";
+            badge.innerHTML = '<i class="bi bi-circle-fill me-1" style="font-size: 8px;"></i> Disconnected';
+            setTimeout(connectWS, 3000);
+        };
+    }
+
+    // --- 4. GPS Geolocation Tracking ---
+    function initGPS() {
+        if ('geolocation' in navigator) {
+            navigator.geolocation.watchPosition(
+                (pos) => {
+                    lat = pos.coords.latitude;
+                    lon = pos.coords.longitude;
+                    document.getElementById('gpsDisplay').innerText = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ action: 'UPDATE_LOCATION', lat: lat, lon: lon }));
+                    }
+                },
+                (err) => {
+                    document.getElementById('gpsDisplay').innerText = "Default GPS (16.5062, 80.6480)";
+                },
+                { enableHighAccuracy: true }
+            );
+        }
+    }
+
+    // --- 5. Autonomous Dual-Mode SOS with Offline Native SMS Intent ---
+    async function triggerDualModeSOS() {
+    const category = document.getElementById('victimCategory')?.value || 'General Emergency';
+    const bldg = document.getElementById('bldgInput')?.value.trim() || 'Tower B';
+    const flat = document.getElementById('flatInput')?.value.trim() || 'Flat 402';
+    const ice = document.getElementById('iceInput')?.value.trim() || '+919391774539';
+    const rawTriage = document.getElementById('aiTriageInput')?.value.trim() || '';
+
+    const microText = `${bldg}, ${flat}`;
+    const currentLat = (typeof lat !== 'undefined' && lat) ? lat : 16.4619;
+    const currentLon = (typeof lon !== 'undefined' && lon) ? lon : 80.5059;
+    const smsPayload = `SOS LOC:${Number(currentLat).toFixed(5)},${Number(currentLon).toFixed(5)} BLDG:${bldg} FLAT:${flat} TYPE:${category}`;
+
+    const payload = {
+        action: 'TRIGGER_SOS',
+        emergency_type: category,
+        latitude: currentLat,
+        longitude: currentLon,
+        lat: currentLat,
+        lon: currentLon,
+        micro_location: microText,
+        raw_text: rawTriage ? `${rawTriage} (${microText})` : microText,
+        victim_phone: ice,
+        guardian_phone: ice
+    };
+
+    if (navigator.onLine) {
+        // 1. Trigger REST API for Twilio AI Voice Call
+        try {
+            fetch('/api/emergency/ai-triage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(res => res.json())
+              .then(data => console.log('AI Voice Call Endpoint Triggered:', data))
+              .catch(err => console.warn('AI Triage REST dispatch warning:', err));
+        } catch (e) {
+            console.warn('REST Call Exception:', e);
+        }
+
+        // 2. Broadcast over WebSocket to Responders and Admin HUD
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(payload));
+        }
+
+        // 3. Update Victim HUD
+        const box = document.getElementById('victimAlertBox');
+        if (box) {
+            box.classList.remove('d-none');
+            document.getElementById('victimAlertText').innerText = `🚨 ${category} broadcasted! AI Voice Call dispatched to ${ice}`;
+        }
+    } else {
+        // Native SMS Fallback Trigger for Zero-Data Scenarios
+        console.warn("Offline mode active. Launching native SMS intent...");
+        window.location.href = `sms:${ice}?body=${encodeURIComponent(smsPayload)}`;
+        
+        const box = document.getElementById('victimAlertBox');
+        if (box) {
+            box.classList.remove('d-none');
+            document.getElementById('victimAlertText').innerHTML = 
+                '<span class="text-warning"><i class="bi bi-envelope-fill me-1"></i> Offline mode activated: Native SMS fallback triggered.</span>';
+        }
+    }
+}
+
+    function flushPendingQueue() {
+        const pending = localStorage.getItem('safetysignal_pending_sos');
+        if (pending && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(pending);
+            localStorage.removeItem('safetysignal_pending_sos');
+        }
+    }
+
+    // --- 6. Acoustic Siren Beacon (Web Audio API) ---
+    let audioContext, oscillator, isSirenOn = false;
+    function toggleAcousticBeacon() {
+        const btn = document.getElementById('sirenBtn');
+        if (!isSirenOn) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            oscillator = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+
+            oscillator.connect(gain);
+            gain.connect(audioContext.destination);
+            oscillator.start();
+            isSirenOn = true;
+            btn.className = "btn btn-sm btn-danger py-0 px-2";
+            btn.innerHTML = '<i class="bi bi-volume-mute-fill me-1"></i>Stop Siren';
+        } else {
+            if (oscillator) oscillator.stop();
+            isSirenOn = false;
+            btn.className = "btn btn-sm btn-outline-danger py-0 px-2";
+            btn.innerHTML = '<i class="bi bi-volume-up-fill me-1"></i>Siren Beacon';
+        }
+    }
+
+    // --- 7. AI Natural Language Triage ---
+    async function runAiTriage() {
+        const input = document.getElementById('aiTriageInput')?.value.trim();
+        const feedback = document.getElementById('aiTriageFeedback');
+        if (!input) return;
+
+        if (feedback) feedback.innerText = "Analyzing incident severity with AI triage...";
+        try {
+            const res = await fetch('/api/emergency/ai-triage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ description: input })
+            });
+            const data = await res.json();
+            
+            if (data && data.category) {
+                const select = document.getElementById('victimCategory');
+                for (let i = 0; i < select.options.length; i++) {
+                    if (select.options[i].value.toLowerCase().includes(data.category.toLowerCase())) {
+                        select.selectedIndex = i;
+                        break;
+                    }
+                }
+                if (feedback) feedback.innerHTML = `✅ Categorized as <b>${data.category}</b> (Severity: <span class="text-danger">${data.severity || 'HIGH'}</span>)`;
+            }
+        } catch (e) {
+            if (feedback) feedback.innerText = "Triage service ready. Defaulting to high priority.";
+        }
+    }
+
+   // --- 8. Role & View Switcher with Auth Gate ---
+    let targetPendingView = null;
+    let authModalInstance = null;
+
+    async function switchView(view) {
+        if (view === 'victim') {
+            renderView(view);
+            return;
+        }
+
+        const savedAuth = JSON.parse(localStorage.getItem('safetysignal_auth'));
+        
+        // Allow access if valid session matches the required role
+        if (savedAuth && (savedAuth.role === view || savedAuth.role === 'admin')) {
+            userId = savedAuth.username;
+            currentRole = savedAuth.role;
+            updateSessionUI(savedAuth);
+            renderView(view);
+            return;
+        }
+
+        // Show modal if unauthenticated
+        targetPendingView = view;
+        document.getElementById('authModalTitle').innerHTML = 
+            view === 'responder' 
+            ? '<i class="bi bi-person-badge-fill text-warning me-2"></i>Responder Verification'
+            : '<i class="bi bi-speedometer2 text-danger me-2"></i>Admin Telemetry Login';
+        
+        document.getElementById('authUsername').value = view === 'responder' ? 'responder1' : 'admin';
+        document.getElementById('authPassword').value = view === 'responder' ? 'password123' : 'admin123';
+        document.getElementById('authAlert').classList.add('d-none');
+
+        authModalInstance = new bootstrap.Modal(document.getElementById('authModal'));
+        authModalInstance.show();
+    }
+
+    async function submitAuthLogin() {
+        const u = document.getElementById('authUsername').value.trim();
+        const p = document.getElementById('authPassword').value.trim();
+        const alertBox = document.getElementById('authAlert');
+
+        try {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: u, password: p })
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                alertBox.innerText = data.detail || "Authentication failed.";
+                alertBox.classList.remove('d-none');
+                return;
+            }
+
+            localStorage.setItem('safetysignal_auth', JSON.stringify(data));
+            userId = data.username;
+            currentRole = data.role;
+            updateSessionUI(data);
+
+            authModalInstance.hide();
+            renderView(targetPendingView);
+        } catch (err) {
+            alertBox.innerText = "Network error communicating with auth service.";
+            alertBox.classList.remove('d-none');
+        }
+    }
+
+    function cancelAuthModal() {
+        document.querySelectorAll('#mainTabs .nav-link').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('#mainTabs .nav-link')[0].classList.add('active');
+    }
+
+    function updateSessionUI(authData) {
+        const sessionBox = document.getElementById('userSessionDisplay');
+        const userLabel = document.getElementById('sessionUserLabel');
+        if (sessionBox && userLabel) {
+            sessionBox.classList.remove('d-none');
+            sessionBox.classList.add('d-flex');
+            userLabel.innerText = `${authData.username} (${authData.role.toUpperCase()})`;
+        }
+    }
+
+    function logoutSession() {
+        localStorage.removeItem('safetysignal_auth');
+        const sessionBox = document.getElementById('userSessionDisplay');
+        if (sessionBox) {
+            sessionBox.classList.add('d-none');
+            sessionBox.classList.remove('d-flex');
+        }
+        renderView('victim');
+    }
+
+    async function renderView(view) {
+        document.querySelectorAll('#mainTabs .nav-link').forEach(btn => btn.classList.remove('active'));
+        document.getElementById('victimView').classList.add('d-none');
+        document.getElementById('responderView').classList.add('d-none');
+        document.getElementById('adminView').classList.add('d-none');
+
+        if (view === 'victim') {
+            currentRole = 'victim';
+            document.querySelectorAll('#mainTabs .nav-link')[0].classList.add('active');
+            document.getElementById('victimView').classList.remove('d-none');
+        } else if (view === 'responder') {
+            document.querySelectorAll('#mainTabs .nav-link')[1].classList.add('active');
+            document.getElementById('responderView').classList.remove('d-none');
+            initResponderMap();
+            loadActiveIncidents();
+        } else if (view === 'admin') {
+            document.querySelectorAll('#mainTabs .nav-link')[2].classList.add('active');
+            document.getElementById('adminView').classList.remove('d-none');
+            fetchAnalytics();
+        }
+
+        if (ws) {
+            ws.onclose = null;
+            ws.close();
+        }
+        await connectWS();
+    }
+
+    // --- 9. Tactical Leaflet Map & Geofenced Resolution ---
+    function initResponderMap() {
+        if (!map) {
+            setTimeout(() => {
+                map = L.map('incidentMap').setView([lat, lon], 14);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(map);
+            }, 100);
+        } else {
+            map.invalidateSize();
+        }
+    }
+
+    async function loadActiveIncidents() {
+        try {
+            const res = await fetch('/api/emergency/active-incidents');
+            const data = await res.json();
+            const queue = document.getElementById('responderQueue');
+            
+            if (data.length > 0) {
+                queue.innerHTML = '';
+                data.forEach(inc => handleNewIncident(inc));
+            } else {
+                queue.innerHTML = '<p class="text-secondary small text-center my-auto py-4">No active incident signals in your area.</p>';
+            }
+        } catch (err) {
+            console.error("Error loading active incidents:", err);
+        }
+    }
+
+    function formatTime(isoStr) {
+        if (!isoStr) return 'Just now';
+        if (!isoStr.endsWith('Z') && !isoStr.includes('+')) isoStr += 'Z';
+        const d = new Date(isoStr);
+        return !isNaN(d) ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : isoStr;
+    }
+
+    function handleNewIncident(msg) {
+        const queue = document.getElementById('responderQueue');
+        if (queue.innerText.includes('No active incident signals')) queue.innerHTML = '';
+
+        const incId = msg.incident_id || msg.id;
+        const isAccepted = msg.status === 'accepted';
+        const isMine = msg.assigned_responder_id === userId;
+
+        if (isAccepted && !isMine && msg.assigned_responder_id) {
+            const existing = document.getElementById(`inc-card-${incId}`);
+            if (existing) existing.remove();
+            return;
+        }
+
+        const timeDisplay = formatTime(msg.created_at);
+        let existingCard = document.getElementById(`inc-card-${incId}`);
+        const mLat = msg.lat || msg.latitude || lat;
+        const mLon = msg.lon || msg.longitude || lon;
+        const micro = msg.micro_location || 'Micro-Location Specified';
+
+        let buttonsHtml = '';
+        if (!isAccepted) {
+            buttonsHtml = `<button class="btn btn-sm btn-outline-success w-100" onclick="acceptIncident(${incId}, '${msg.victim_id}')">Accept Dispatch</button>`;
+        } else if (isMine) {
+            buttonsHtml = `
+                <button class="btn btn-sm btn-outline-warning w-100" onclick="releaseIncident(${incId}, '${msg.victim_id}')">Release</button>
+                <button class="btn btn-sm btn-success w-100" onclick="resolveIncidentWithGeofence(${incId}, '${msg.victim_id}', ${mLat}, ${mLon})">Resolve (50m Lock)</button>
+            `;
+        }
+
+        const cardContent = `
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="badge ${isAccepted ? 'bg-warning text-dark' : 'bg-danger'}">#${incId} ${msg.emergency_type}</span>
+                <small class="text-secondary">${micro}</small>
+            </div>
+            <div class="d-flex justify-content-between align-items-center small text-secondary mb-2">
+                <span><i class="bi bi-geo-alt text-danger me-1"></i>${mLat.toFixed(4)}, ${mLon.toFixed(4)}</span>
+                <span><i class="bi bi-clock me-1 text-info"></i>${timeDisplay}</span>
+            </div>
+            <div class="d-flex gap-2">
+                ${buttonsHtml}
+            </div>
+        `;
+
+        if (existingCard) {
+            existingCard.className = `p-3 rounded mb-2 border ${isAccepted ? 'border-warning' : 'border-danger'}`;
+            existingCard.innerHTML = cardContent;
+            return;
+        }
+
+        const card = document.createElement('div');
+        card.className = `p-3 rounded mb-2 border ${isAccepted ? 'border-warning' : 'border-danger'}`;
+        card.style.background = '#1a1829';
+        card.id = `inc-card-${incId}`;
+        card.innerHTML = cardContent;
+        queue.prepend(card);
+
+        if (map) {
+            const mapsUrl = `https://www.google.com/maps?q=${mLat},${mLon}`;
+            if (!markers[incId]) {
+                const marker = L.marker([mLat, mLon]).addTo(map)
+                    .bindPopup(`<b>#${incId} ${msg.emergency_type}</b><br><small class="text-muted"><i class="bi bi-door-open"></i> ${micro}</small><br><a href="${mapsUrl}" target="_blank">Open Native Maps Navigation</a>`);
+                markers[incId] = marker;
+            }
+            map.panTo([mLat, mLon]);
+        }
+    }
+
+    function acceptIncident(id, vId) {
+    // 1. Send WebSocket notification to backend
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'ACCEPT_INCIDENT', incident_id: id, victim_id: vId }));
+    }
+
+    // 2. Locate the specific card element
+    const card = document.getElementById(`inc-card-${id}`);
+    if (card) {
+        // Switch card border styling to active state
+        card.classList.remove('border-danger');
+        card.classList.add('border-warning');
+
+        // Update the badge styling from red to warning/yellow
+        const badge = card.querySelector('.badge');
+        if (badge) {
+            badge.classList.remove('bg-danger');
+            badge.classList.add('bg-warning', 'text-dark');
+        }
+
+        // 3. Swap the "Accept Dispatch" button with "Release" & "Resolve (50m lock)" buttons
+        let actionsContainer = card.querySelector('.action-buttons-container') || card.querySelector('button')?.parentElement;
+        
+        if (actionsContainer) {
+            actionsContainer.innerHTML = `
+                <div class="d-flex gap-2 w-100 mt-2">
+                    <button class="btn btn-outline-warning btn-sm w-50 fw-semibold" onclick="releaseIncident(${id}, '${vId}')">
+                        Release
+                    </button>
+                    <button class="btn btn-success btn-sm w-50 fw-semibold" onclick="resolveIncident(${id})">
+                        Resolve (50m lock)
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    // 4. (Optional Safety Sync) Refresh the full incidents list if helper exists
+    if (typeof loadActiveIncidents === 'function') {
+        setTimeout(loadActiveIncidents, 300);
+    }
+}
+
+    function releaseIncident(id, vId) {
+    if (confirm("Are you sure you cannot attend this incident? It will be immediately re-broadcast to other nearby responders.")) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            // Send both common release action keys for backward compatibility with your router
+            ws.send(JSON.stringify({ 
+                action: 'ABORT_INCIDENT', 
+                incident_id: id, 
+                victim_id: vId 
+            }));
+        }
+        
+        // Remove the card immediately from this responder's view
+        const card = document.getElementById(`inc-card-${id}`);
+        if (card) {
+            card.remove();
+        }
+
+        // Re-sync with active pool if available
+        if (typeof loadActiveIncidents === 'function') {
+            setTimeout(loadActiveIncidents, 300);
+        }
+    }
+}
+
+    // Proximity evaluation helper
+    function calculateHaversineMeters(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function resolveIncidentWithGeofence(id, vId, incLat, incLon) {
+        const dist = calculateHaversineMeters(lat, lon, incLat, incLon);
+        if (dist > 50.0) {
+            alert(`🔒 Geofence Lock Active: You are ${dist.toFixed(1)}m away from the victim's door. You must be within 50.0m to mark resolved.`);
+            return;
+        }
+
+        // Within geofence -> resolve over WebSocket
+        ws.send(JSON.stringify({
+            action: 'RESOLVE_INCIDENT',
+            incident_id: id,
+            victim_id: vId,
+            lat: lat,
+            lon: lon
+        }));
+
+        document.getElementById(`inc-card-${id}`)?.remove();
+        if (markers[id]) {
+            map.removeLayer(markers[id]);
+            delete markers[id];
+        }
+        alert(`✅ Incident resolved! Verified within ${dist.toFixed(1)}m. Karma awarded.`);
+    }
+
+    function simulateResponderApproach() {
+        if (simInterval) {
+            clearInterval(simInterval);
+            simInterval = null;
+            if (simVehicleMarker && map) { map.removeLayer(simVehicleMarker); simVehicleMarker = null; }
+            document.getElementById('mapStatus').innerText = "Simulation stopped";
+            return;
+        }
+
+        document.getElementById('mapStatus').innerText = "Simulating approach...";
+        let currentSimLat = lat - 0.005;
+        let currentSimLon = lon - 0.005;
+
+        const vehicleIcon = L.divIcon({
+            html: '<div style="background:#3b82f6;color:white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px #3b82f6;"><i class="bi bi-truck"></i></div>',
+            className: ''
+        });
+
+        simVehicleMarker = L.marker([currentSimLat, currentSimLon], { icon: vehicleIcon }).addTo(map);
+
+        simInterval = setInterval(() => {
+            currentSimLat += 0.0005;
+            currentSimLon += 0.0005;
+            if (simVehicleMarker) simVehicleMarker.setLatLng([currentSimLat, currentSimLon]);
+
+            lat = currentSimLat;
+            lon = currentSimLon;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'UPDATE_LOCATION', lat: currentSimLat, lon: currentSimLon }));
+            }
+
+            const dist = calculateHaversineMeters(currentSimLat, currentSimLon, lat, lon);
+            if (Math.abs(currentSimLat - lat) < 0.0002) {
+                clearInterval(simInterval);
+                simInterval = null;
+                document.getElementById('mapStatus').innerText = "Arrived within Geofence (<50m)";
+            }
+        }, 800);
+    }
+
+    // --- 10. Admin & Analytics Dashboard Fetcher ---
+    async function fetchAnalytics() {
+        try {
+            const res = await fetch('/api/emergency/analytics');
+            if (!res.ok) return;
+            const data = await res.json();
+            
+            document.getElementById('statTotal').innerText = data.total ?? 0;
+            document.getElementById('statActive').innerText = data.active ?? 0;
+            document.getElementById('statUnaccepted').innerText = data.unaccepted ?? 0;
+            document.getElementById('statResolved').innerText = data.resolved ?? 0;
+
+            const unacceptedBody = document.getElementById('unacceptedTableBody');
+            if (data.unaccepted_incidents && data.unaccepted_incidents.length > 0) {
+                unacceptedBody.innerHTML = data.unaccepted_incidents.map(inc => `
+                    <tr>
+                        <td class="fw-bold text-warning">#${inc.id}</td>
+                        <td>${inc.emergency_type}</td>
+                        <td>${inc.micro_location || (inc.latitude?.toFixed(4) + ', ' + inc.longitude?.toFixed(4))}</td>
+                        <td><span class="badge bg-warning-subtle text-warning border border-warning">STATUTORY 112 DISPATCHED</span></td>
+                        <td class="text-secondary small">${formatTime(inc.created_at)}</td>
+                    </tr>
+                `).join('');
+            } else {
+                unacceptedBody.innerHTML = `<tr><td colspan="5" class="text-center text-secondary py-2">No unaccepted/escalated cases.</td></tr>`;
+            }
+
+            const allBody = document.getElementById('adminTableBody');
+            if (data.all_incidents && data.all_incidents.length > 0) {
+                allBody.innerHTML = data.all_incidents.map(inc => {
+                    let badgeClass = 'badge-active';
+                    if (inc.status === 'accepted') badgeClass = 'badge-accepted';
+                    else if (inc.status === 'resolved') badgeClass = 'badge-resolved';
+                    else if (inc.status.includes('UNACCEPTED') || inc.status.includes('STALLED')) badgeClass = 'badge bg-warning text-dark';
+
+                    return `
+                        <tr>
+                            <td class="fw-bold">#${inc.id}</td>
+                            <td>${inc.emergency_type}</td>
+                            <td>${inc.micro_location || (inc.latitude?.toFixed(4) + ', ' + inc.longitude?.toFixed(4))}</td>
+                            <td><span class="badge ${badgeClass}">${inc.status.toUpperCase()}</span></td>
+                            <td class="text-secondary small">${formatTime(inc.created_at)}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } else {
+                allBody.innerHTML = `<tr><td colspan="5" class="text-center text-secondary py-3">No incidents recorded yet.</td></tr>`;
+            }
+        } catch (e) {
+            console.error("Error fetching analytics:", e);
+        }
+    }
+
+    // --- Window Initialization ---
+    window.onload = () => {
+        initProfileCache();
+        updateNetworkStatus();
+        connectWS();
+        initGPS();
+    };
+
+    if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then((reg) => console.log('✓ SafetySignal ServiceWorker Active, Scope:', reg.scope))
+      .catch((err) => console.warn('ServiceWorker Registration Failed:', err));
+  });
+}
+
+// --- SHAKE DETECTION ENGINE ---
+let lastX = null, lastY = null, lastZ = null;
+let shakeCount = 0;
+let lastShakeTime = 0;
+const SHAKE_THRESHOLD = 15; // Sensitivity: lower = more sensitive, higher = harder shake
+const REQUIRED_SHAKES = 3;  // Number of shakes needed
+
+function initShakeDetection() {
+    if (typeof DeviceMotionEvent !== 'undefined') {
+        // iOS 13+ requires explicit user permission
+        if (typeof DeviceMotionEvent.requestPermission === 'function') {
+            DeviceMotionEvent.requestPermission()
+                .then(permissionState => {
+                    if (permissionState === 'granted') {
+                        window.addEventListener('devicemotion', handleMotion);
+                    }
+                })
+                .catch(console.error);
+        } else {
+            // Android Chrome / Standard Browsers
+            window.addEventListener('devicemotion', handleMotion);
+        }
+    } else {
+        console.warn("DeviceMotionEvent not supported on this device/browser.");
+    }
+}
+
+function handleMotion(event) {
+    const acc = event.accelerationIncludingGravity || event.acceleration;
+    if (!acc || acc.x === null) return;
+
+    const currentTime = Date.now();
+
+    if (lastX !== null) {
+        const deltaX = Math.abs(acc.x - lastX);
+        const deltaY = Math.abs(acc.y - lastY);
+        const deltaZ = Math.abs(acc.z - lastZ);
+
+        // Calculate combined movement delta
+        const speed = deltaX + deltaY + deltaZ;
+
+        if (speed > SHAKE_THRESHOLD) {
+            // Count shakes within a 2-second window
+            if (currentTime - lastShakeTime > 250) { // Debounce individual movements
+                shakeCount++;
+                lastShakeTime = currentTime;
+
+                // If shaken 3 times quickly, trigger SOS
+                if (shakeCount >= REQUIRED_SHAKES) {
+                    shakeCount = 0; // Reset
+                    onShakeSOSDetected();
+                }
+            }
+        }
+    }
+
+    // Reset counter if too much time passes between shakes (> 2 seconds)
+    if (currentTime - lastShakeTime > 2000) {
+        shakeCount = 0;
+    }
+
+    lastX = acc.x;
+    lastY = acc.y;
+    lastZ = acc.z;
+}
+
+// Action triggered when shaking is detected
+function onShakeSOSDetected() {
+    // 1. Vibrate device for feedback (if supported)
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]);
+
+    // 2. Trigger SOS directly or show confirmation modal
+    const userConfirmed = confirm("🚨 SHAKE DETECTED! Send Emergency SOS immediately?");
+    if (userConfirmed) {
+        // Trigger your existing SOS function
+        triggerSOS("Physical Panic Shake SOS");
+    }
+}
+
+// Initialize on page load / first touch
+window.addEventListener('load', initShakeDetection);
+document.body.addEventListener('click', initShakeDetection, { once: true });
+
+</script>
+</body>
+</html>
