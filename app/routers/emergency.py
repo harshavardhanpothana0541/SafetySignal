@@ -20,7 +20,7 @@ from app.services.outbound_notifier import trigger_ai_guardian_call, send_respon
 
 load_dotenv()
 
-raw_contacts = os.getenv("EMERGENCY_CONTACTS", "+919876543210")
+raw_contacts = os.getenv("EMERGENCY_CONTACTS", "+919391774539")
 DEFAULT_EMERGENCY_CONTACTS = [num.strip() for num in raw_contacts.split(",") if num.strip()]
 
 router = APIRouter(prefix="/api/emergency", tags=["Emergency"])
@@ -591,7 +591,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                         "responder_id": user_id
                     })
 
-                    await manager.broadcast_all({
+                    await manager.broadcast_sos({
                         "type": "INCIDENT_CLAIMED",
                         "incident_id": incident_id,
                         "assigned_responder_id": user_id,
