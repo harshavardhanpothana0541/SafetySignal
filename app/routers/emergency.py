@@ -21,7 +21,7 @@ from app.services.outbound_notifier import trigger_ai_guardian_call, send_respon
 load_dotenv()
 
 raw_contacts = os.getenv("EMERGENCY_CONTACTS", "+919391774539")
-DEFAULT_EMERGENCY_CONTACTS = [num.strip() for num in raw_contacts.split(",") if num.strip()]
+DEFAULT_EMERGENCY_CONTACTS = list(dict.fromkeys([num.strip() for num in raw_contacts.split(",") if num.strip()]))
 
 router = APIRouter(prefix="/api/emergency", tags=["Emergency"])
 
@@ -101,15 +101,6 @@ async def perform_ai_triage(req: TriageRequest):
             created_at=datetime.now(timezone.utc).isoformat() + "Z",
             radius_km=25.0
         )
-    elif hasattr(manager, "broadcast_all"):
-        await manager.broadcast_all({
-            "type": "NEW_INCIDENT",
-            "incident_id": inc_id,
-            "emergency_type": new_incident.emergency_type,
-            "lat": req.latitude,
-            "lon": req.longitude,
-            "micro_location": req.micro_location
-        })
 
     return {
         "status": "dispatched",
@@ -187,8 +178,8 @@ async def accept_dispatch_rest(incident_id: int, responder_phone: Optional[str] 
             emergency_type=incident.emergency_type
         ))
 
-        if hasattr(manager, "broadcast_all"):
-            await manager.broadcast_all({
+        if hasattr(manager, "broadcast_sos"):
+            await manager.broadcast_sos({
                 "type": "INCIDENT_CLAIMED",
                 "incident_id": incident.id,
                 "assigned_responder_id": "responder_unit_alpha",
@@ -330,8 +321,8 @@ async def resolve_incident_rest(payload: ResolveRequest):
         ))
         db.commit()
 
-        if hasattr(manager, "broadcast_all"):
-            await manager.broadcast_all({
+        if hasattr(manager, "broadcast_sos"):
+            await manager.broadcast_sos({
                 "type": "INCIDENT_RESOLVED_ALL",
                 "incident_id": incident.id,
                 "distance_meters": distance_m
@@ -370,8 +361,8 @@ async def monitor_abandoned_incidents():
                         timestamp=now_utc
                     ))
                     db.commit()
-                    if hasattr(manager, "broadcast_all"):
-                        await manager.broadcast_all({
+                    if hasattr(manager, "broadcast_sos"):
+                        await manager.broadcast_sos({
                             "type": "SLA_BREACH_ESCALATION",
                             "incident_id": inc.id,
                             "severity": "P0-SLA-BREACHED"
@@ -672,7 +663,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                 if incident:
                     if resp_lat is not None and resp_lon is not None:
                         within_fence, dist_m = verify_resolution_geofence(resp_lat, resp_lon, incident.latitude, incident.longitude, 50.0)
-                        if not within_fence:
+                        if not内的_fence := within_fence:
                             db.close()
                             if user_id in manager.active_connections:
                                 await manager.active_connections[user_id]["ws"].send_text(json.dumps({
@@ -706,7 +697,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                         "type": "INCIDENT_RESOLVED",
                         "incident_id": incident_id
                     })
-                    await manager.broadcast_all({
+                    await manager.broadcast_sos({
                         "type": "INCIDENT_RESOLVED_ALL",
                         "incident_id": incident_id
                     })

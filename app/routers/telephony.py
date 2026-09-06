@@ -89,7 +89,7 @@ async def process_missed_call(clean_phone: str, db: Session):
 
     # Real-Time WebSocket Broadcast to CAD Dashboard & Responders
     try:
-        await manager.broadcast({
+        await manager.broadcast_sos({
             "type": "NEW_INCIDENT",
             "incident_id": new_incident.id,
             "victim_id": new_incident.victim_id,
@@ -127,7 +127,7 @@ async def twilio_missed_call_webhook(request: Request, db: Session = Depends(get
     # Valid TwiML to acknowledge and cleanly end the call
     twiml_response = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Emergency alert received. Help is on the way.</Say>
+    <Say voice="Polly.Aditi">Emergency alert received. Help is on the way.</Say>
     <Hangup/>
 </Response>"""
     return Response(content=twiml_response, media_type="application/xml")
@@ -184,7 +184,7 @@ async def twilio_sms_webhook(request: Request, db: Session = Depends(get_db)):
         db.commit()
 
         try:
-            await manager.broadcast({
+            await manager.broadcast_sos({
                 "type": "HANDSHAKE_UPDATE",
                 "incident_id": incident.id,
                 "status": incident.status,
@@ -274,7 +274,7 @@ async def handle_sms_reply_simulator(payload: SMSReplyPayload, db: Session = Dep
     db.add(audit_entry)
     db.commit()
 
-    await manager.broadcast({
+    await manager.broadcast_sos({
         "type": "HANDSHAKE_UPDATE",
         "incident_id": incident.id,
         "status": incident.status,
