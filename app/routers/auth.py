@@ -1,3 +1,4 @@
+# app/routers/auth.py
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
@@ -13,6 +14,13 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     badge_number: str
+
+class RegisterResponderRequest(BaseModel):
+    username: str
+    password: str
+    phone_number: Optional[str] = "+919391774539"
+    badge_number: Optional[str] = None
+    role: Optional[str] = "responder"
 
 class LoginRequest(BaseModel):
     username: str
@@ -78,6 +86,54 @@ def generate_client_token(req: TokenRequest):
     }
 
 
+@router.post("/register-responder")
+def register_new_responder(req: RegisterResponderRequest):
+    """
+    Allows voluntary responder onboarding directly from UI modal with automatic login token.
+    """
+    db = SessionLocal()
+    try:
+        clean_username = req.username.strip()
+        existing_user = db.query(models.User).filter(models.User.username == clean_username).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Username already registered. Please sign in.")
+
+        badge = req.badge_number or f"VOL-{clean_username[:4].upper()}-99"
+        new_user = models.User(
+            username=clean_username,
+            hashed_password=auth_service.get_password_hash(req.password),
+            phone_number=req.phone_number,
+            badge_number=badge,
+            full_name=clean_username,
+            role="responder",
+            karma_score=100,
+            strikes=0,
+            is_suspended=False
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+
+        token = auth_service.create_access_token({
+            "sub": new_user.username,
+            "badge_number": new_user.badge_number,
+            "role": new_user.role
+        })
+
+        return {
+            "status": "success",
+            "message": "Responder successfully registered!",
+            "access_token": token,
+            "token_type": "bearer",
+            "username": new_user.username,
+            "badge_number": new_user.badge_number,
+            "role": new_user.role,
+            "karma_score": new_user.karma_score
+        }
+    finally:
+        db.close()
+
+
 @router.post("/register")
 def register_responder(req: RegisterRequest):
     db = SessionLocal()
@@ -91,7 +147,8 @@ def register_responder(req: RegisterRequest):
             hashed_password=auth_service.get_password_hash(req.password),
             badge_number=req.badge_number,
             role="responder",
-            is_verified=True
+            is_suspended=False,
+            karma_score=100
         )
         db.add(new_user)
         db.commit()

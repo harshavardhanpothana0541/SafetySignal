@@ -4,11 +4,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine
 from app import models
 from app.routers import emergency, auth, telephony, aiops_engine
-from app.routers.emergency import monitor_abandoned_incidents
+from app.routers.emergency import monitor_abandoned_incidents, admin_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,11 +29,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Enable CORS for Cross-Origin PWA Handshakes
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Mount static directory for CSS, JS, and Assets
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Mount Routers
 app.include_router(emergency.router)
+app.include_router(admin_router)        # Step 1 & Step 4: Admin Purge & Responder Management
 app.include_router(auth.router)
 app.include_router(telephony.router)
 app.include_router(aiops_engine.router)
@@ -65,5 +76,8 @@ async def serve_sw():
     return FileResponse(
         "static/sw.js",
         media_type="application/javascript",
-        headers={"Service-Worker-Allowed": "/"}
+        headers={
+            "Service-Worker-Allowed": "/",
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+        }
     )

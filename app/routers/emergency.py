@@ -4,12 +4,12 @@ import json
 import asyncio
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, status, Depends
 from pydantic import BaseModel
 from typing import Optional
 
 from app.websocket_manager import manager
-from app.database import SessionLocal
+from app.database import SessionLocal, get_db
 from app import models
 from app.services.sms_service import sms_service
 from app.services.ai_triage import ai_triage_service
@@ -24,6 +24,7 @@ raw_contacts = os.getenv("EMERGENCY_CONTACTS", "+919391774539")
 DEFAULT_EMERGENCY_CONTACTS = list(dict.fromkeys([num.strip() for num in raw_contacts.split(",") if num.strip()]))
 
 router = APIRouter(prefix="/api/emergency", tags=["Emergency"])
+admin_router = APIRouter(prefix="/api/admin", tags=["Admin Management"])
 
 class TriageRequest(BaseModel):
     description: Optional[str] = "Emergency Alert"
@@ -42,105 +43,193 @@ class ResolveRequest(BaseModel):
     action_note: Optional[str] = "RESOLVED_MANUAL_VERIFICATION"
 
 
+# =====================================================================
+# STEP 1 & STEP 4: ADMIN PURGE & RESPONDER MANAGEMENT ENDPOINTS
+# =====================================================================
+
+@admin_router.delete("/purge-incidents")
+def purge_all_incidents():
+    """Wipes all stale/test incidents and responder audit logs to reset counters."""
+    db = SessionLocal()
+    try:
+        deleted_logs = db.query(models.ResponderLog).delete()
+        deleted_incidents = db.query(models.Incident).delete()
+        db.commit()
+        return {
+            "status": "success",
+            "message": f"Purged {deleted_incidents} incidents and {deleted_logs} log records."
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@admin_router.get("/responders")
+def get_all_registered_responders():
+    """Returns all registered responders with their current suspension status and karma score."""
+    db = SessionLocal()
+    try:
+        responders = db.query(models.User).filter(
+            models.User.role.in_(["responder", "pending_responder"])
+        ).all()
+        return [
+            {
+                "id": u.id,
+                "username": u.username,
+                "phone": getattr(u, "phone_number", "N/A"),
+                "karma": getattr(u, "karma_score", 100),
+                "is_suspended": getattr(u, "is_suspended", False),
+                "strikes": getattr(u, "strikes", 0)
+            }
+            for u in responders
+        ]
+    finally:
+        db.close()
+
+
+@admin_router.post("/responders/{responder_id}/lift-suspension")
+def lift_responder_suspension(responder_id: int):
+    """Allows Admin to verify and undo suspension for a responder."""
+    db = SessionLocal()
+    try:
+        responder = db.query(models.User).filter(models.User.id == responder_id).first()
+        if not responder:
+            raise HTTPException(status_code=404, detail="Responder not found")
+        
+        responder.is_suspended = False
+        if hasattr(responder, "strikes"):
+            responder.strikes = 0
+        db.commit()
+        return {"status": "success", "message": f"Suspension lifted for {responder.username}"}
+    finally:
+        db.close()
+
+
+# =====================================================================
+# EMERGENCY INGESTION & DEDUPLICATION (STEP 2)
+# =====================================================================
+
 @router.post("/ai-triage")
 async def perform_ai_triage(req: TriageRequest):
     """
-    REST SOS Ingestion: Analyzes emergency, creates database record, 
-    bridges 112 CAD, broadcasts WebSocket update, and fires AI Guardian Voice Call.
+    REST SOS Ingestion with 10-second deduplication guard:
+    Prevents duplicate cases from firing on rapid button presses.
     """
-    triage_analysis = ai_triage_service.analyze_incident(req.description or req.emergency_type)
-    
     db = SessionLocal()
-    new_incident = models.Incident(
-        victim_id="web_victim_user",
-        victim_phone=req.victim_phone,
-        latitude=req.latitude,
-        longitude=req.longitude,
-        micro_location_text=req.micro_location,
-        emergency_type=req.emergency_type or triage_analysis.get("incident_type", "General Emergency"),
-        severity_level=triage_analysis.get("severity", "Critical"),
-        ingestion_source="pwa_sos_button",
-        status="active",
-        victim_handshake_status="pending",
-        cad_112_forwarded=True,
-        created_at=datetime.now(timezone.utc)
-    )
-    db.add(new_incident)
-    db.commit()
-    db.refresh(new_incident)
-    inc_id = new_incident.id
-    db.close()
+    try:
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(seconds=10)
+        
+        # Step 2: Temporal deduplication check
+        existing_case = db.query(models.Incident).filter(
+            models.Incident.status == "active",
+            models.Incident.victim_phone == req.victim_phone,
+            models.Incident.created_at >= recent_cutoff
+        ).first()
 
-    # 1. Statutory 112 CAD / Telegram Bridge
-    asyncio.create_task(forward_to_statutory_112_cad(
-        incident_id=inc_id,
-        latitude=req.latitude,
-        longitude=req.longitude,
-        emergency_type=new_incident.emergency_type,
-        severity_level=new_incident.severity_level,
-        micro_location=req.micro_location,
-        victim_phone=req.victim_phone
-    ))
+        if existing_case:
+            return {
+                "status": "duplicate_suppressed",
+                "incident_id": existing_case.id,
+                "message": "Duplicate distress request suppressed within 10s window."
+            }
 
-    # 2. Outbound AI Guardian Call to Emergency Contact
-    asyncio.create_task(trigger_ai_guardian_call(
-        victim_identifier=req.victim_phone or "Family Member",
-        emergency_type=new_incident.emergency_type,
-        micro_location=req.micro_location,
-        target_phone=req.guardian_phone or req.victim_phone or DEFAULT_EMERGENCY_CONTACTS[0]
-    ))
-
-    # 3. Broadcast to all Connected Responders via WebSocket
-    if hasattr(manager, "broadcast_sos"):
-        await manager.broadcast_sos(
+        triage_analysis = ai_triage_service.analyze_incident(req.description or req.emergency_type)
+        
+        new_incident = models.Incident(
             victim_id="web_victim_user",
-            lat=req.latitude,
-            lon=req.longitude,
-            emergency_type=new_incident.emergency_type,
-            incident_id=inc_id,
-            created_at=datetime.now(timezone.utc).isoformat() + "Z",
-            radius_km=25.0
+            victim_phone=req.victim_phone,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            micro_location_text=req.micro_location,
+            emergency_type=req.emergency_type or triage_analysis.get("incident_type", "General Emergency"),
+            severity_level=triage_analysis.get("severity", "Critical"),
+            ingestion_source="pwa_sos_button",
+            status="active",
+            victim_handshake_status="pending",
+            cad_112_forwarded=True,
+            created_at=datetime.now(timezone.utc)
         )
+        db.add(new_incident)
+        db.commit()
+        db.refresh(new_incident)
+        inc_id = new_incident.id
 
-    return {
-        "status": "dispatched",
-        "incident_id": inc_id,
-        "ai_analysis": triage_analysis,
-        "ai_guardian_call": "dispatched"
-    }
+        # 1. Statutory 112 CAD / Telegram Bridge
+        asyncio.create_task(forward_to_statutory_112_cad(
+            incident_id=inc_id,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            emergency_type=new_incident.emergency_type,
+            severity_level=new_incident.severity_level,
+            micro_location=req.micro_location,
+            victim_phone=req.victim_phone
+        ))
+
+        # 2. Outbound AI Guardian Call to Emergency Contact
+        asyncio.create_task(trigger_ai_guardian_call(
+            victim_identifier=req.victim_phone or "Family Member",
+            emergency_type=new_incident.emergency_type,
+            micro_location=req.micro_location,
+            target_phone=req.guardian_phone or req.victim_phone or DEFAULT_EMERGENCY_CONTACTS[0]
+        ))
+
+        # 3. Broadcast to all Connected Responders via WebSocket
+        if hasattr(manager, "broadcast_sos"):
+            await manager.broadcast_sos(
+                victim_id="web_victim_user",
+                lat=req.latitude,
+                lon=req.longitude,
+                emergency_type=new_incident.emergency_type,
+                incident_id=inc_id,
+                created_at=datetime.now(timezone.utc).isoformat() + "Z",
+                radius_km=25.0
+            )
+
+        return {
+            "status": "dispatched",
+            "incident_id": inc_id,
+            "ai_analysis": triage_analysis,
+            "ai_guardian_call": "dispatched"
+        }
+    finally:
+        db.close()
 
 
 @router.get("/active-incidents")
 async def get_active_incidents():
     """Fetches active incidents within 2 hours or currently accepted cases."""
     db = SessionLocal()
-    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=2)
+    try:
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=2)
 
-    incidents = db.query(models.Incident).filter(
-        (models.Incident.status == "accepted") |
-        (models.Incident.status == "en_route") |
-        ((models.Incident.status == "active") & (models.Incident.created_at >= cutoff_time))
-    ).order_by(models.Incident.id.desc()).all()
-    
-    results = [
-        {
-            "incident_id": inc.id,
-            "id": inc.id,
-            "victim_id": inc.victim_id,
-            "victim_phone": inc.victim_phone,
-            "lat": inc.latitude,
-            "lon": inc.longitude,
-            "micro_location": inc.micro_location_text,
-            "emergency_type": inc.emergency_type,
-            "severity_level": inc.severity_level,
-            "status": inc.status,
-            "assigned_responder_id": inc.assigned_responder_id,
-            "created_at": (inc.created_at.isoformat() + "Z") if inc.created_at else None
-        }
-        for inc in incidents
-    ]
-    db.close()
-    return results
+        incidents = db.query(models.Incident).filter(
+            (models.Incident.status == "accepted") |
+            (models.Incident.status == "en_route") |
+            ((models.Incident.status == "active") & (models.Incident.created_at >= cutoff_time))
+        ).order_by(models.Incident.id.desc()).all()
+        
+        results = [
+            {
+                "incident_id": inc.id,
+                "id": inc.id,
+                "victim_id": inc.victim_id,
+                "victim_phone": inc.victim_phone,
+                "lat": inc.latitude,
+                "lon": inc.longitude,
+                "micro_location": inc.micro_location_text,
+                "emergency_type": inc.emergency_type,
+                "severity_level": inc.severity_level,
+                "status": inc.status,
+                "assigned_responder_id": inc.assigned_responder_id,
+                "created_at": (inc.created_at.isoformat() + "Z") if inc.created_at else None
+            }
+            for inc in incidents
+        ]
+        return results
+    finally:
+        db.close()
 
 
 @router.post("/accept-dispatch/{incident_id}")
@@ -253,10 +342,10 @@ async def get_analytics_data():
         responders_status = [
             {
                 "username": u.username,
-                "badge_number": u.badge_number,
+                "badge_number": getattr(u, "badge_number", "N/A"),
                 "karma_score": getattr(u, "karma_score", 100),
-                "strikes": u.strikes,
-                "is_suspended": u.is_suspended
+                "strikes": getattr(u, "strikes", 0),
+                "is_suspended": getattr(u, "is_suspended", False)
             }
             for u in users
         ]
@@ -379,7 +468,7 @@ async def monitor_abandoned_incidents():
                 responder_id = inc.assigned_responder_id
                 user = db.query(models.User).filter(models.User.username == responder_id).first()
                 if user:
-                    user.strikes += 1
+                    user.strikes = getattr(user, "strikes", 0) + 1
                     if user.strikes >= 2:
                         user.is_suspended = True
 
@@ -417,6 +506,10 @@ async def monitor_abandoned_incidents():
         finally:
             db.close()
 
+
+# =====================================================================
+# WEBSOCKET REAL-TIME MESH & DISPATCH CONTROL
+# =====================================================================
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
@@ -461,11 +554,23 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                 victim_phone = data.get("victim_phone")
 
                 db = SessionLocal()
+                # Step 2: Temporal Deduplication for WebSocket triggers
+                recent_cutoff = datetime.now(timezone.utc) - timedelta(seconds=10)
+                existing_case = db.query(models.Incident).filter(
+                    models.Incident.status == "active",
+                    models.Incident.victim_id == user_id,
+                    models.Incident.created_at >= recent_cutoff
+                ).first()
+
+                if existing_case:
+                    db.close()
+                    continue
+
                 user = db.query(models.User).filter(models.User.username == user_id).first() if user_id else None
                 
                 micro_location = ""
-                if user and user.default_flat_no:
-                    micro_location = f"{user.default_building or ''}, Floor {user.default_floor or 'N/A'}, Flat {user.default_flat_no}"
+                if user and getattr(user, "default_flat_no", None):
+                    micro_location = f"{getattr(user, 'default_building', '')}, Floor {getattr(user, 'default_floor', 'N/A')}, Flat {user.default_flat_no}"
                 elif raw_text:
                     micro_location = raw_text
 
@@ -539,7 +644,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                     if user_id in manager.active_connections:
                         await manager.active_connections[user_id]["ws"].send_text(json.dumps({
                             "type": "ACCOUNT_SUSPENDED",
-                            "message": "Account suspended due to repeated unfulfilled dispatches. Contact Admin."
+                            "message": "Account suspended due to unfulfilled dispatches. Contact Admin."
                         }))
                     continue
 
@@ -598,7 +703,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                             "incident_id": incident_id
                         }))
 
-            elif action == "RELEASE_INCIDENT":
+            elif action in ["RELEASE_INCIDENT", "ABORT_INCIDENT"]:
                 if role != "responder":
                     continue
 
@@ -663,7 +768,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                 if incident:
                     if resp_lat is not None and resp_lon is not None:
                         within_fence, dist_m = verify_resolution_geofence(resp_lat, resp_lon, incident.latitude, incident.longitude, 50.0)
-                        if not内的_fence := within_fence:
+                        if not within_fence:
                             db.close()
                             if user_id in manager.active_connections:
                                 await manager.active_connections[user_id]["ws"].send_text(json.dumps({
