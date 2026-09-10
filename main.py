@@ -70,6 +70,7 @@ async def serve_dashboard():
 async def serve_manifest():
     return FileResponse("static/manifest.json", media_type="application/manifest+json")
 
+
 # Root Service Worker Link (with Root-Scope permission header)
 @app.get("/sw.js")
 async def serve_sw():

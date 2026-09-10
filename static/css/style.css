@@ -188,6 +188,7 @@ body {
     margin-bottom: 10px;
 }
 
+
 /* --- Mobile Viewport Responsiveness --- */
 @media (max-width: 768px) {
     #incidentMap, #map {
