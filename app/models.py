@@ -54,6 +54,11 @@ class Incident(Base):
     ingestion_source = Column(String, default="pwa_online")  # pwa_online, offline_sms, missed_call, guest_sos
     status = Column(String, default="active")  # active, accepted, arrived, resolved, escalated, false_alarm
     
+    # Voice Activation & Triage Evidence Telemetry
+    trigger_method = Column(String, default="MANUAL_PANIC_BUTTON")  # MANUAL_PANIC_BUTTON, VOICE_TRIGGERED
+    transcript = Column(Text, nullable=True)                         # Recognized voice trigger text
+    media_url = Column(String, nullable=True)                          # Link to 5s situational triage buffer
+    
     # Handshake & Verification Locks
     is_geofence_verified = Column(Boolean, default=False)
     victim_handshake_status = Column(String, default="pending")  # pending, confirmed_safe, still_needs_help

@@ -26,6 +26,11 @@ DEFAULT_EMERGENCY_CONTACTS = list(dict.fromkeys([num.strip() for num in raw_cont
 router = APIRouter(prefix="/api/emergency", tags=["Emergency"])
 admin_router = APIRouter(prefix="/api/admin", tags=["Admin Management"])
 
+
+# =====================================================================
+# PYDANTIC SCHEMAS
+# =====================================================================
+
 class TriageRequest(BaseModel):
     description: Optional[str] = "Emergency Alert"
     emergency_type: Optional[str] = "Medical / Cardiac"
@@ -34,6 +39,9 @@ class TriageRequest(BaseModel):
     micro_location: Optional[str] = "Live Web App Distress Pin"
     victim_phone: Optional[str] = "+919391774539"
     guardian_phone: Optional[str] = "+919391774539"
+    # Metadata for hands-free / voice activation
+    trigger_method: Optional[str] = "MANUAL_PANIC_BUTTON"
+    transcript: Optional[str] = None
 
 class ResolveRequest(BaseModel):
     incident_id: int
@@ -111,17 +119,18 @@ def lift_responder_suspension(responder_id: int):
 # EMERGENCY INGESTION & DEDUPLICATION (STEP 2)
 # =====================================================================
 
+@router.post("/trigger")
 @router.post("/ai-triage")
 async def perform_ai_triage(req: TriageRequest):
     """
     REST SOS Ingestion with 10-second deduplication guard:
-    Prevents duplicate cases from firing on rapid button presses.
+    Handles both manual panic buttons and voice-activated SOS triggers.
     """
     db = SessionLocal()
     try:
         recent_cutoff = datetime.now(timezone.utc) - timedelta(seconds=10)
         
-        # Step 2: Temporal deduplication check
+        # Temporal deduplication check
         existing_case = db.query(models.Incident).filter(
             models.Incident.status == "active",
             models.Incident.victim_phone == req.victim_phone,
@@ -135,7 +144,9 @@ async def perform_ai_triage(req: TriageRequest):
                 "message": "Duplicate distress request suppressed within 10s window."
             }
 
-        triage_analysis = ai_triage_service.analyze_incident(req.description or req.emergency_type)
+        triage_analysis = ai_triage_service.analyze_incident(
+            f"{req.description or ''} {req.emergency_type or ''} {req.transcript or ''}".strip()
+        )
         
         new_incident = models.Incident(
             victim_id="web_victim_user",
@@ -145,7 +156,9 @@ async def perform_ai_triage(req: TriageRequest):
             micro_location_text=req.micro_location,
             emergency_type=req.emergency_type or triage_analysis.get("incident_type", "General Emergency"),
             severity_level=triage_analysis.get("severity", "Critical"),
-            ingestion_source="pwa_sos_button",
+            ingestion_source=req.trigger_method or "pwa_sos_button",
+            trigger_method=req.trigger_method or "MANUAL_PANIC_BUTTON",
+            transcript=req.transcript,
             status="active",
             victim_handshake_status="pending",
             cad_112_forwarded=True,
@@ -175,7 +188,7 @@ async def perform_ai_triage(req: TriageRequest):
             target_phone=req.guardian_phone or req.victim_phone or DEFAULT_EMERGENCY_CONTACTS[0]
         ))
 
-        # 3. Broadcast to all Connected Responders via WebSocket
+        # 3. Broadcast to all Connected Responders & CAD via WebSocket
         if hasattr(manager, "broadcast_sos"):
             await manager.broadcast_sos(
                 victim_id="web_victim_user",
@@ -184,12 +197,16 @@ async def perform_ai_triage(req: TriageRequest):
                 emergency_type=new_incident.emergency_type,
                 incident_id=inc_id,
                 created_at=datetime.now(timezone.utc).isoformat() + "Z",
-                radius_km=25.0
+                radius_km=25.0,
+                trigger_method=req.trigger_method,
+                transcript=req.transcript
             )
 
         return {
             "status": "dispatched",
             "incident_id": inc_id,
+            "trigger_method": req.trigger_method,
+            "transcript": req.transcript,
             "ai_analysis": triage_analysis,
             "ai_guardian_call": "dispatched"
         }
@@ -221,6 +238,8 @@ async def get_active_incidents():
                 "micro_location": inc.micro_location_text,
                 "emergency_type": inc.emergency_type,
                 "severity_level": inc.severity_level,
+                "trigger_method": getattr(inc, "trigger_method", "MANUAL"),
+                "transcript": getattr(inc, "transcript", None),
                 "status": inc.status,
                 "assigned_responder_id": inc.assigned_responder_id,
                 "created_at": (inc.created_at.isoformat() + "Z") if inc.created_at else None
@@ -325,6 +344,8 @@ async def get_analytics_data():
                 "longitude": inc.longitude,
                 "micro_location": inc.micro_location_text,
                 "emergency_type": inc.emergency_type,
+                "trigger_method": getattr(inc, "trigger_method", "MANUAL"),
+                "transcript": getattr(inc, "transcript", None),
                 "status": status_display,
                 "created_at": (created_dt.isoformat()) if created_dt else None
             }
@@ -552,9 +573,10 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                 emergency_type = data.get("emergency_type", "Medical / Cardiac")
                 raw_text = data.get("raw_text", "")
                 victim_phone = data.get("victim_phone")
+                trigger_method = data.get("trigger_method", "MANUAL_PANIC_BUTTON")
+                transcript = data.get("transcript", None)
 
                 db = SessionLocal()
-                # Step 2: Temporal Deduplication for WebSocket triggers
                 recent_cutoff = datetime.now(timezone.utc) - timedelta(seconds=10)
                 existing_case = db.query(models.Incident).filter(
                     models.Incident.status == "active",
@@ -583,7 +605,10 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                     longitude=lon,
                     micro_location_text=micro_location or "GPS Coordinate Pin",
                     emergency_type=emergency_type,
-                    severity_level="Critical" if "heart" in raw_text.lower() or "fire" in emergency_type.lower() else "High",
+                    severity_level="Critical" if "heart" in (raw_text + (transcript or "")).lower() or "fire" in emergency_type.lower() else "High",
+                    ingestion_source=trigger_method,
+                    trigger_method=trigger_method,
+                    transcript=transcript,
                     status="active",
                     cad_112_forwarded=True,
                     created_at=datetime.now(timezone.utc)
@@ -630,7 +655,9 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                     emergency_type=emergency_type,
                     incident_id=incident_id,
                     created_at=incident_time,
-                    radius_km=25.0
+                    radius_km=25.0,
+                    trigger_method=trigger_method,
+                    transcript=transcript
                 )
 
             elif action == "ACCEPT_INCIDENT":
