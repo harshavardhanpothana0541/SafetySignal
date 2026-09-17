@@ -20,7 +20,7 @@ from app.services.outbound_notifier import trigger_ai_guardian_call, send_respon
 
 load_dotenv()
 
-raw_contacts = os.getenv("EMERGENCY_CONTACTS", "+919391774539")
+raw_contacts = os.getenv("EMERGENCY_CONTACTS", "+919876543210")
 DEFAULT_EMERGENCY_CONTACTS = list(dict.fromkeys([num.strip() for num in raw_contacts.split(",") if num.strip()]))
 
 router = APIRouter(prefix="/api/emergency", tags=["Emergency"])
@@ -37,8 +37,8 @@ class TriageRequest(BaseModel):
     latitude: Optional[float] = 16.461935
     longitude: Optional[float] = 80.505878
     micro_location: Optional[str] = "Live Web App Distress Pin"
-    victim_phone: Optional[str] = "+919391774539"
-    guardian_phone: Optional[str] = "+919391774539"
+    victim_phone: Optional[str] = "+919876543210"
+    guardian_phone: Optional[str] = "+919876543210"
     # Metadata for hands-free / voice activation
     trigger_method: Optional[str] = "MANUAL_PANIC_BUTTON"
     transcript: Optional[str] = None
@@ -252,7 +252,7 @@ async def get_active_incidents():
 
 
 @router.post("/accept-dispatch/{incident_id}")
-async def accept_dispatch_rest(incident_id: int, responder_phone: Optional[str] = "+919391774539"):
+async def accept_dispatch_rest(incident_id: int, responder_phone: Optional[str] = "+919876543210"):
     """REST endpoint for dispatch claim with instant SMS routing dispatch."""
     db = SessionLocal()
     try:

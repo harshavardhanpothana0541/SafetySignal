@@ -25,7 +25,7 @@ def get_twilio_from_number():
     return raw_num.strip().replace('"', '')
 
 def get_default_guardian_phone():
-    raw_phone = os.getenv("GUARDIAN_DEFAULT_PHONE") or os.getenv("EMERGENCY_CONTACTS") or "+919391774539"
+    raw_phone = os.getenv("GUARDIAN_DEFAULT_PHONE") or os.getenv("EMERGENCY_CONTACTS") or "+919876543210"
     return raw_phone.split(",")[0].strip().replace('"', '')
 
 async def trigger_ai_guardian_call(victim_identifier: str, emergency_type: str, micro_location: str, target_phone: str = None):

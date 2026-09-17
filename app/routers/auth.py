@@ -18,7 +18,7 @@ class RegisterRequest(BaseModel):
 class RegisterResponderRequest(BaseModel):
     username: str
     password: str
-    phone_number: Optional[str] = "+919391774539"
+    phone_number: Optional[str] = "+919876543210"
     badge_number: Optional[str] = None
     role: Optional[str] = "responder"
 
